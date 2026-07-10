@@ -25,6 +25,44 @@ body {
   font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 14px;
 }
+
+/* ---- background spread (aurora) -------------------------------------- */
+.aurora {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
+  background:
+    radial-gradient(52rem 32rem at 8% -8%, rgba(47, 107, 255, 0.14), transparent 60%),
+    radial-gradient(44rem 30rem at 96% 4%, rgba(124, 58, 237, 0.10), transparent 60%),
+    radial-gradient(40rem 26rem at 55% 108%, rgba(23, 178, 106, 0.10), transparent 60%),
+    var(--bg);
+}
+.aurora::before, .aurora::after {
+  content: ''; position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.5;
+  animation: drift 22s ease-in-out infinite alternate;
+}
+.aurora::before { width: 520px; height: 520px; left: -140px; top: -160px; background: #cfe0ff; }
+.aurora::after {
+  width: 460px; height: 460px; right: -120px; bottom: -180px; background: #e4dcff;
+  animation-duration: 28s; animation-delay: -8s;
+}
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(70px, 50px, 0) scale(1.15); }
+}
+
+/* ---- hero band -------------------------------------------------------- */
+.hero {
+  position: relative; border-radius: 18px; overflow: hidden; margin-bottom: 22px;
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+  background:
+    linear-gradient(100deg, rgba(10, 18, 42, 0.86) 18%, rgba(15, 30, 70, 0.62) 55%, rgba(20, 40, 90, 0.35)),
+    url('/hero-stadium.jpg') center 38% / cover no-repeat;
+  padding: 26px 28px;
+  display: flex; align-items: center; gap: 18px;
+}
+.hero h1 { color: #fff; margin: 0; font-size: 27px; font-weight: 800; letter-spacing: -0.3px; }
+.hero .sub { color: #c8d4ee; font-size: 13px; margin-top: 3px; }
+.hero .searchbox { background: rgba(255, 255, 255, 0.94); border-color: transparent; }
+.hero .ghost { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
 button { font-family: inherit; }
 input { font-family: inherit; }
 
@@ -104,7 +142,18 @@ input { font-family: inherit; }
 .mcard {
   border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;
   display: flex; flex-direction: column; gap: 10px; background: var(--panel);
+  position: relative; transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
+.mcard:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 8px rgba(16, 24, 40, 0.06), 0 18px 36px -14px rgba(47, 107, 255, 0.25);
+  border-color: #c9d8ff;
+}
+.flag {
+  width: 22px; height: 15px; border-radius: 3px; object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.12); vertical-align: -2px;
+}
+.flag.lg { width: 30px; height: 20px; }
 .mcard-top { display: flex; align-items: center; gap: 8px; }
 .minute-chip {
   background: var(--blue-soft); color: var(--blue); font-weight: 700; font-size: 12px;
@@ -145,8 +194,16 @@ input { font-family: inherit; }
   font-size: 13px; outline: none;
 }
 .primary {
-  background: var(--blue); color: #fff; border: none; border-radius: 10px;
+  background: linear-gradient(110deg, var(--blue) 40%, #6d8dff 50%, var(--blue) 60%);
+  background-size: 220% 100%; animation: shimmer 3.2s linear infinite;
+  color: #fff; border: none; border-radius: 10px;
   padding: 9px 14px; font-weight: 600; font-size: 12.5px; cursor: pointer;
+}
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.live-dot { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(23, 178, 106, 0.5); }
+  55% { box-shadow: 0 0 0 7px rgba(23, 178, 106, 0); }
 }
 .primary:disabled { opacity: 0.5; cursor: default; }
 .ghost {

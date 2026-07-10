@@ -65,6 +65,12 @@ export function registerRoutes(app: FastifyInstance): void {
     });
   });
 
+  /** Real Golden Boot standings aggregated from per-match PlayerStats. */
+  app.get('/api/tournament/scorers', async () => {
+    const rows = await db.query.scorers.findMany();
+    return rows.sort((a, b) => b.goals - a.goals).slice(0, 20);
+  });
+
   app.get('/api/leaderboard', async () =>
     db.query.walletProfiles.findMany({
       orderBy: desc(schema.walletProfiles.realizedPnl),

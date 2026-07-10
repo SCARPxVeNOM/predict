@@ -9,6 +9,7 @@ import { startAutoMarketEngine } from './services/autoMarket.js';
 import { startIndexer } from './services/indexer.js';
 import { startSettler } from './services/settler.js';
 import { startPositionIndexer } from './services/positions.js';
+import { startAiMarketAuthor } from './services/aiMarkets.js';
 
 // Never let a transient RPC failure (429s etc.) kill the whole process —
 // every service has its own retry loop.
@@ -29,7 +30,11 @@ const stops = [
   startIndexer(ctx),
   startSettler(ctx, pool),
   startPositionIndexer(pool),
+  startAiMarketAuthor(ctx, pool),
 ];
+console.log(
+  `[main] AI market author: ${config.geminiApiKey ? `Gemini (${config.geminiModel})` : 'deterministic only — set GEMINI_API_KEY in .env to enable'}`,
+);
 
 const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });

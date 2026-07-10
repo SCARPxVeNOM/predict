@@ -133,6 +133,23 @@ export function classAMarkets(fx: FixtureInfo, period: StatPeriod = 0): MarketDe
         op: null,
         negation: false,
       }),
+      // Winning margins (2+ goals) — subtract + threshold (spec §3).
+      base(fx.fixtureId, 'home-wins-by-2', `${fx.home} to win by 2+ goals?`, {
+        period: 0,
+        statAKey: STAT.P1_GOALS,
+        statBKey: STAT.P2_GOALS,
+        predicate: { threshold: 1, comparison: 'GreaterThan' },
+        op: 'Subtract',
+        negation: false,
+      }),
+      base(fx.fixtureId, 'away-wins-by-2', `${fx.away} to win by 2+ goals?`, {
+        period: 0,
+        statAKey: STAT.P2_GOALS,
+        statBKey: STAT.P1_GOALS,
+        predicate: { threshold: 1, comparison: 'GreaterThan' },
+        op: 'Subtract',
+        negation: false,
+      }),
       // Corners and cards O/U.
       base(fx.fixtureId, 'ou-corners-8.5', 'Over 8.5 total corners?', {
         period: 0,
@@ -140,6 +157,22 @@ export function classAMarkets(fx: FixtureInfo, period: StatPeriod = 0): MarketDe
         statBKey: STAT.P2_CORNERS,
         predicate: { threshold: 8, comparison: 'GreaterThan' },
         op: 'Add',
+        negation: false,
+      }),
+      base(fx.fixtureId, 'ou-corners-10.5', 'Over 10.5 total corners?', {
+        period: 0,
+        statAKey: STAT.P1_CORNERS,
+        statBKey: STAT.P2_CORNERS,
+        predicate: { threshold: 10, comparison: 'GreaterThan' },
+        op: 'Add',
+        negation: false,
+      }),
+      base(fx.fixtureId, 'home-most-corners', `${fx.home} to win the corner count?`, {
+        period: 0,
+        statAKey: STAT.P1_CORNERS,
+        statBKey: STAT.P2_CORNERS,
+        predicate: { threshold: 0, comparison: 'GreaterThan' },
+        op: 'Subtract',
         negation: false,
       }),
       base(fx.fixtureId, 'ou-yellows-3.5', 'Over 3.5 yellow cards?', {

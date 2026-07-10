@@ -49,9 +49,12 @@ export function startAutoMarketEngine(ctx: Ctx, pool: Program<GroundtruthPool>) 
 
       // NOTE: catalog templates speak home/away in P1/P2 stat terms; when the
       // feed has P1 = away team, home/away labels must swap.
-      const home = f.Participant1IsHome ? f.Participant1 : f.Participant2;
-      const away = f.Participant1IsHome ? f.Participant2 : f.Participant1;
-      const defs = classAMarkets({ fixtureId: f.FixtureId, home, away });
+      // Template stat keys are P1/P2-based, so the names fed to the catalog
+      // MUST be P1/P2 names (not venue home/away) or questions and predicates
+      // could disagree when the feed lists the away side as Participant1.
+      const fxInfo = { fixtureId: f.FixtureId, home: f.Participant1, away: f.Participant2 };
+      // Full-game catalog + first-half O/U variants.
+      const defs = [...classAMarkets(fxInfo), ...classAMarkets(fxInfo, 1)];
 
       for (const def of defs) {
         const id = `${f.FixtureId}:${def.slug}`;

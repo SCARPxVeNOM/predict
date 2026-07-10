@@ -58,9 +58,10 @@ export default function App() {
         </div>
       </aside>
 
+      <div className="aurora" />
       <main className="maincol">
-        <div className="pagehead">
-          <div>
+        <div className="hero">
+          <div style={{ flex: 1 }}>
             <h1>FIFA World Cup 2026</h1>
             <div className="sub">Predict. Trade. Win. — every result provable on-chain.</div>
           </div>
@@ -98,6 +99,9 @@ export default function App() {
         <div className="footer">
           © 2026 World Cup Markets · Solana devnet · settlement proofs by TxLINE — no mock data,
           every number on this page is on-chain or from the licensed feed.
+          <br />
+          Stadium photo by YoTuT (CC BY 2.0, Wikimedia Commons) · flags from flagcdn.com (public
+          domain)
         </div>
       </main>
     </div>

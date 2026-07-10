@@ -34,6 +34,8 @@ export const config = {
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
   /** How often the tournament/AI market author runs. */
   aiTickMs: 6 * 3600_000,
+  /** How often we check for live matches needing in-play AI markets. */
+  liveAiPollMs: 60_000,
 };
 
 export function loadKeeper(): Keypair {

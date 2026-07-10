@@ -39,6 +39,10 @@ export function startIndexer(ctx: Ctx) {
         statusId: statusId ?? null,
         clockSeconds,
         scoreJson: record.Score ? JSON.stringify(record.Score) : fixture.scoreJson,
+        statsJson:
+          record.Stats && Object.keys(record.Stats).length
+            ? JSON.stringify(record.Stats)
+            : fixture.statsJson,
         lastSeq: record.Seq,
         lastTs: record.Ts,
         updatedAt: now,
@@ -58,7 +62,13 @@ export function startIndexer(ctx: Ctx) {
 
       if (statusId !== undefined && VOID_STATUSES.has(statusId)) {
         next = 'Void'; // settler performs the on-chain void after the deadline
-      } else if (m.state === 'Open' && (now >= m.lockTs || (statusId !== undefined && statusId !== SOCCER_STATUS.NS))) {
+      } else if (
+        m.state === 'Open' &&
+        (now >= m.lockTs ||
+          // In-play markets are created mid-match by design and lock purely by
+          // their own timed window, never by "the match has started".
+          (statusId !== undefined && statusId !== SOCCER_STATUS.NS && m.lockRule !== 'in-play'))
+      ) {
         next = 'Locked';
       }
       if ((next === 'Locked' || m.state === 'Locked') && statusId !== undefined && statusId >= 2 && statusId <= 13) {

@@ -16,6 +16,8 @@ export const fixtures = sqliteTable('fixtures', {
   clockSeconds: integer('clock_seconds'),
   /** Latest Score object (JSON) from the feed. */
   scoreJson: text('score_json'),
+  /** Latest full provable stat map (JSON, stat key → value) from the feed. */
+  statsJson: text('stats_json'),
   lastSeq: integer('last_seq'),
   lastTs: integer('last_ts'),
   updatedAt: integer('updated_at').notNull(),

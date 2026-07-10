@@ -1,23 +1,166 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api.js';
+import { flagSrc } from '../lib/flags.js';
+import MarketCard from '../components/MarketCard.js';
+
+interface ScorerRow {
+  playerId: number;
+  name: string | null;
+  team: string | null;
+  goals: number;
+}
+
 /**
- * Long-horizon Class-C (composed) markets — group qualification, bracket,
- * champion. Resolved from per-match on-chain proofs + a public deterministic
- * rule set. Ships after the Class-A live loop (spec fenced this as the last
- * milestone); until then this surface documents the method honestly.
+ * Tournament-level markets, authored by the AI market service and validated
+ * against real bracket/scorer data. Chain-tier outrights (champion, finalist)
+ * attach to a real on-chain pool the moment the deciding fixture exists;
+ * Golden Boot markets are feed-attested and labeled as such.
  */
 export default function Predictions() {
+  const { data: markets = [] } = useQuery({ queryKey: ['markets'], queryFn: () => api.markets() });
+  const { data: scorers = [] } = useQuery<ScorerRow[]>({
+    queryKey: ['scorers'],
+    queryFn: async () => {
+      const res = await fetch('/api/tournament/scorers');
+      return (await res.json()) as ScorerRow[];
+    },
+    refetchInterval: 60_000,
+  });
+
+  const tournament = markets.filter((m) => m.id.startsWith('wc:'));
+  const outrights = tournament.filter((m) => m.marketClass === 'C');
+  const feed = tournament.filter((m) => m.marketClass === 'B');
+  // Award categories are keyed by slug prefix (server-side rule kinds).
+  const scorerMarkets = feed.filter((m) => m.slug.startsWith('golden-boot'));
+  const awardSections: [string, string, typeof feed][] = [
+    [
+      'Fair Play Award',
+      'Best card record — fair-play points (yellow −1, red −3) from aggregated TxLINE card stats.',
+      feed.filter((m) => m.slug.startsWith('fair-play')),
+    ],
+    [
+      'Most clean sheets',
+      'Clean sheets counted from aggregated TxLINE goal stats across the tournament.',
+      feed.filter((m) => m.slug.startsWith('clean-sheets')),
+    ],
+    [
+      'Most team goals',
+      'Team goals summed from aggregated TxLINE goal stats across the tournament.',
+      feed.filter((m) => m.slug.startsWith('team-goals')),
+    ],
+  ];
+  const knownPrefixes = ['golden-boot', 'fair-play', 'clean-sheets', 'team-goals'];
+  const otherFeed = feed.filter((m) => !knownPrefixes.some((p) => m.slug.startsWith(p)));
+
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h2>Predictions</h2>
+    <>
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Tournament Outrights</h2>
+        </div>
+        <div className="panel-sub">
+          Champion &amp; bracket markets — authored automatically, settled by the deciding match's
+          on-chain Merkle proof. Staking opens when the deciding fixture is announced.
+        </div>
+        {!outrights.length ? (
+          <div className="empty">
+            Outright markets are generated from the live bracket — they appear as soon as the
+            remaining teams are known (the market author runs every few hours).
+          </div>
+        ) : (
+          <div className="cards">
+            {outrights.map((m) => (
+              <div key={m.id}>
+                <MarketCard m={m} />
+                {!m.marketPda && (
+                  <div className="mini-note" style={{ marginTop: 6 }}>
+                    ⏳ stakes open once the deciding fixture is announced
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="notice">
-        <b>Composed markets (Class C)</b> resolve from many per-match on-chain proofs plus a
-        published deterministic rule (group points → goal difference → goals scored →
-        head-to-head). Every <i>input</i> is chain-verifiable; the aggregation rule is public.
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Golden Boot race</h2>
+        </div>
+        <div className="panel-sub">
+          Real goals aggregated from the TxLINE per-match player stats (coverage window) —
+          feed-attested, not chain-proven, and labeled that way.
+        </div>
+        {!scorers.length ? (
+          <div className="empty">Scorer standings build up as covered matches finish.</div>
+        ) : (
+          <table className="lb">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Player</th>
+                <th>Team</th>
+                <th>Goals</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorers.map((s, i) => (
+                <tr key={s.playerId}>
+                  <td>{i + 1}</td>
+                  <td style={{ fontWeight: 600 }}>{s.name ?? `Player #${s.playerId}`}</td>
+                  <td>
+                    {s.team && flagSrc(s.team) && (
+                      <img className="flag" src={flagSrc(s.team)!} alt="" style={{ marginRight: 6 }} />
+                    )}
+                    {s.team}
+                  </td>
+                  <td style={{ fontWeight: 700 }}>{s.goals}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {scorerMarkets.length > 0 && (
+          <>
+            <h3 className="sec">Top-scorer markets</h3>
+            <div className="cards">
+              {scorerMarkets.map((m) => (
+                <MarketCard key={m.id} m={m} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      <div className="empty">
-        Group-qualification and bracket markets unlock as remaining World Cup fixtures settle.
-      </div>
-    </div>
+
+      {awardSections.map(
+        ([title, sub, items]) =>
+          items.length > 0 && (
+            <div className="panel" key={title}>
+              <div className="panel-head">
+                <h2>{title}</h2>
+              </div>
+              <div className="panel-sub">{sub} Feed-attested, not chain-proven — and labeled that way.</div>
+              <div className="cards">
+                {items.map((m) => (
+                  <MarketCard key={m.id} m={m} />
+                ))}
+              </div>
+            </div>
+          ),
+      )}
+
+      {otherFeed.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>More tournament markets</h2>
+          </div>
+          <div className="cards">
+            {otherFeed.map((m) => (
+              <MarketCard key={m.id} m={m} />
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

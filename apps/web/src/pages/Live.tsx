@@ -4,6 +4,7 @@ import { api, subscribeStream, type FixtureRow, type MarketRow } from '../lib/ap
 import { decimalOdds, isLive, minuteChip, scoreOf, usdt } from '../lib/format.js';
 import MarketCard from '../components/MarketCard.js';
 import Sparkline from '../components/Sparkline.js';
+import { flagSrc } from '../lib/flags.js';
 
 export default function Live({ search }: { search: string }) {
   const qc = useQueryClient();
@@ -127,7 +128,9 @@ function PopularTable({
             <tr key={m.id}>
               <td style={{ fontWeight: 600 }}>{m.question}</td>
               <td className="match-cell">
-                {f.home} {scoreOf(f)} {f.away}
+                {flagSrc(f.home) && <img className="flag" src={flagSrc(f.home)!} alt="" />}{' '}
+                {f.home} {scoreOf(f)} {f.away}{' '}
+                {flagSrc(f.away) && <img className="flag" src={flagSrc(f.away)!} alt="" />}
                 {min && <span className="min">{min}</span>}
               </td>
               <td>

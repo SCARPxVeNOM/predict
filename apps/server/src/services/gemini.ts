@@ -17,8 +17,12 @@ export async function geminiGenerate(prompt: string): Promise<string | null> {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 8192,
             responseMimeType: 'application/json',
+            // 2.5-series models think by default; spend the budget on output.
+            ...(config.geminiModel.includes('2.5')
+              ? { thinkingConfig: { thinkingBudget: 0 } }
+              : {}),
           },
         }),
       },

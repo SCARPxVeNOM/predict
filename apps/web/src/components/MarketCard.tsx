@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAnchorWallet } from '@solana/wallet-adapter-react';
 import type { FixtureRow, MarketRow } from '../lib/api.js';
 import { decimalOdds, minuteChip, usdt } from '../lib/format.js';
+import { flagFromText, flagSrc } from '../lib/flags.js';
 import { sendDeposit } from '../lib/solana.js';
 import Sparkline from './Sparkline.js';
 import ReceiptView from './ReceiptView.js';
@@ -55,10 +56,15 @@ export default function MarketCard({
       </div>
 
       <div className="mcard-q">
+        {!fixture && flagFromText(m.question) && (
+          <img className="flag lg" src={flagFromText(m.question)!} alt="" style={{ marginRight: 8 }} />
+        )}
         {m.question}
         {fixture && (
           <small>
-            {fixture.home} vs {fixture.away}
+            {flagSrc(fixture.home) && <img className="flag" src={flagSrc(fixture.home)!} alt="" />}{' '}
+            {fixture.home} vs {fixture.away}{' '}
+            {flagSrc(fixture.away) && <img className="flag" src={flagSrc(fixture.away)!} alt="" />}
           </small>
         )}
       </div>
