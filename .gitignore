@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+.wallets/
+coverage/
+.DS_Store
+# Anchor/Rust build output (deploy keypair lives here — never commit)
+program/target/
+program/.anchor/
+*.tsbuildinfo
+apps/server/data/

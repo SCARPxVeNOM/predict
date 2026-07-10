@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  # Pulled in transitively by wallet-adapter-wallets; not needed for the
+  # Phantom/Solflare adapters we actually use.
+  '@stellar/stellar-sdk': false
+  better-sqlite3: true
+  bigint-buffer: true
+  blake-hash: false
+  bufferutil: true
+  esbuild: true
+  protobufjs: false
+  tiny-secp256k1: false
+  usb: false
+  utf-8-validate: true

@@ -1,0 +1,23 @@
+{
+  "name": "groundtruth",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:server": "pnpm --filter @groundtruth/server dev",
+    "dev:web": "pnpm --filter @groundtruth/web dev",
+    "test": "vitest run",
+    "typecheck": "tsc -b --noEmit false --pretty false || pnpm -r --if-present typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

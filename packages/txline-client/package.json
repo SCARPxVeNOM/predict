@@ -1,0 +1,20 @@
+{
+  "name": "@groundtruth/txline-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@groundtruth/shared": "workspace:*",
+    "eventsource": "^3.0.6",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

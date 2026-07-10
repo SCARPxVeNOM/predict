@@ -1,0 +1,21 @@
+[package]
+name = "groundtruth-pool"
+version = "0.1.0"
+description = "Parimutuel prediction pools resolved by CPI into the TxLINE txoracle validate_stat proof check"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "groundtruth_pool"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-spl = "0.31.1"

@@ -1,0 +1,14 @@
+[toolchain]
+
+[programs.devnet]
+groundtruth_pool = "B3XJrPdtvDRpnwNyk6s633WNrwJed2jJCKrE3Xuwn537"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "echo no ts tests here"
