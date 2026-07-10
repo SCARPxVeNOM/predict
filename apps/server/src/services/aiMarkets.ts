@@ -24,15 +24,12 @@ import type { Ctx } from './txline.js';
 // v1 allows only rules whose settlement path is fully wired: champion
 // (attaches to the final's on-chain proof) and top-scorer (feed aggregate).
 // Anything else an LLM invents is rejected here — a wrong market cannot ship.
-const ruleSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('champion'), teamId: z.number().int() }),
-  z.object({ kind: z.literal('top-scorer'), playerId: z.number().int() }),
-  // Award categories computable purely from aggregated TxLINE stats
-  // (user decision 2026-07-10: TxLINE data only, the AI just parses it).
-  z.object({ kind: z.literal('fair-play'), teamId: z.number().int() }),
-  z.object({ kind: z.literal('clean-sheets'), teamId: z.number().int() }),
-  z.object({ kind: z.literal('team-goals'), teamId: z.number().int() }),
-]);
+// Champion is the ONLY sound tournament-level rule: it settles by the final
+// match's on-chain proof. Award rules (top scorer, fair play, clean sheets,
+// team goals) were removed 2026-07-11 — they aggregate the WHOLE tournament,
+// but TxLINE's coverage window can't see the group stage, so no market on
+// them can settle truthfully.
+const ruleSchema = z.object({ kind: z.literal('champion'), teamId: z.number().int() });
 
 /** Provable per-fixture stat grammar (spec §3): base keys 1–8, optional
  * period scope, one- or two-stat predicate with Add/Subtract. Anything the
@@ -289,61 +286,13 @@ export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
     }
   }
 
-  interface TeamAggregate {
-    teamId: number;
-    name: string;
-    matches: number;
-    goals: number;
-    yellows: number;
-    reds: number;
-    cleanSheets: number;
-    /** FIFA fair-play style points from provable card stats: yellow −1, red −3
-     * (the feed doesn't split direct/second-yellow reds; formula documented). */
-    fairPlayPoints: number;
-  }
-
-  /** Per-team tournament aggregates from finished fixtures' final stat maps —
-   * pure TxLINE data, the ground truth for every award category. */
-  async function teamAggregates(): Promise<TeamAggregate[]> {
-    const fixtures = await db.query.fixtures.findMany();
-    const finished = fixtures.filter(
-      (f) => f.competitionId === 72 && fixtureDone(f) && f.statsJson,
-    );
-    const byTeam = new Map<number, TeamAggregate>();
-    const get = (teamId: number, name: string) => {
-      let t = byTeam.get(teamId);
-      if (!t) {
-        t = { teamId, name, matches: 0, goals: 0, yellows: 0, reds: 0, cleanSheets: 0, fairPlayPoints: 0 };
-        byTeam.set(teamId, t);
-      }
-      return t;
-    };
-    for (const f of finished) {
-      const stats = JSON.parse(f.statsJson!) as Record<string, number>;
-      const p1 = get(f.homeIsP1 ? f.homeId : f.awayId, f.homeIsP1 ? f.home : f.away);
-      const p2 = get(f.homeIsP1 ? f.awayId : f.homeId, f.homeIsP1 ? f.away : f.home);
-      const g1 = stats['1'] ?? 0;
-      const g2 = stats['2'] ?? 0;
-      p1.matches += 1;
-      p2.matches += 1;
-      p1.goals += g1;
-      p2.goals += g2;
-      p1.yellows += stats['3'] ?? 0;
-      p2.yellows += stats['4'] ?? 0;
-      p1.reds += stats['5'] ?? 0;
-      p2.reds += stats['6'] ?? 0;
-      if (g2 === 0) p1.cleanSheets += 1;
-      if (g1 === 0) p2.cleanSheets += 1;
-    }
-    for (const t of byTeam.values()) t.fairPlayPoints = -(t.yellows + 3 * t.reds);
-    return [...byTeam.values()];
-  }
-
-  function deterministicProposals(
-    teams: AliveTeam[],
-    topScorers: (typeof schema.scorers.$inferSelect)[],
-    aggregates: TeamAggregate[] = [],
-  ): z.infer<typeof proposalSchema>['markets'] {
+  // NOTE (user correction 2026-07-11): tournament AWARD markets (Golden Boot,
+  // Fair Play, most clean sheets, most team goals) were removed. They are
+  // whole-tournament aggregates, but TxLINE's coverage window only reaches
+  // back ~2 weeks — we cannot see the group stage, so no data source we have
+  // can settle them truthfully. Only champion (decided by the final's proof)
+  // and per-fixture markets are sound.
+  function deterministicProposals(teams: AliveTeam[]): z.infer<typeof proposalSchema>['markets'] {
     const out: z.infer<typeof proposalSchema>['markets'] = [];
     for (const t of teams.slice(0, 8)) {
       out.push({
@@ -356,81 +305,21 @@ export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
         rationale: `${t.name} is still alive in the bracket; decided by the final's on-chain match proof.`,
       });
     }
-    for (const s of topScorers.slice(0, 5)) {
-      const label = s.name ?? `Player #${s.playerId}`;
-      out.push({
-        slug: `golden-boot-${s.playerId}`,
-        question: `${label} (${s.team}) to win the Golden Boot?`,
-        yesLabel: label,
-        noLabel: 'Anyone else',
-        tier: 'feed',
-        rule: { kind: 'top-scorer', playerId: s.playerId },
-        rationale: `Currently on ${s.goals} goals in our coverage window; resolved from aggregated feed PlayerStats.`,
-      });
-    }
-    // Award categories, each grounded in the live tournament aggregates.
-    const byFairPlay = [...aggregates].sort((a, b) => b.fairPlayPoints - a.fairPlayPoints);
-    for (const t of byFairPlay.slice(0, 3)) {
-      out.push({
-        slug: `fair-play-${t.teamId}`,
-        question: `${t.name} to win the Fair Play Award?`,
-        yesLabel: t.name,
-        noLabel: 'Any other team',
-        tier: 'feed',
-        rule: { kind: 'fair-play', teamId: t.teamId },
-        rationale: `Best card record so far (${t.yellows} yellows, ${t.reds} reds in ${t.matches} matches); fair-play points from aggregated TxLINE card stats.`,
-      });
-    }
-    const byCleanSheets = [...aggregates].sort((a, b) => b.cleanSheets - a.cleanSheets);
-    for (const t of byCleanSheets.slice(0, 3)) {
-      if (!t.cleanSheets) continue;
-      out.push({
-        slug: `clean-sheets-${t.teamId}`,
-        question: `${t.name} to keep the most clean sheets?`,
-        yesLabel: t.name,
-        noLabel: 'Any other team',
-        tier: 'feed',
-        rule: { kind: 'clean-sheets', teamId: t.teamId },
-        rationale: `${t.cleanSheets} clean sheet(s) in ${t.matches} matches so far, from aggregated TxLINE goal stats.`,
-      });
-    }
-    const byGoals = [...aggregates].sort((a, b) => b.goals - a.goals);
-    for (const t of byGoals.slice(0, 3)) {
-      if (!t.goals) continue;
-      out.push({
-        slug: `team-goals-${t.teamId}`,
-        question: `${t.name} to score the most goals in the tournament?`,
-        yesLabel: t.name,
-        noLabel: 'Any other team',
-        tier: 'feed',
-        rule: { kind: 'team-goals', teamId: t.teamId },
-        rationale: `${t.goals} goals in ${t.matches} matches so far, from aggregated TxLINE goal stats.`,
-      });
-    }
     return out;
   }
 
   async function aiProposals(
     teams: AliveTeam[],
-    topScorers: (typeof schema.scorers.$inferSelect)[],
     existingSlugs: string[],
-    aggregates: TeamAggregate[],
   ): Promise<z.infer<typeof proposalSchema>['markets']> {
-    const prompt = `You author prediction markets for the remaining FIFA World Cup 2026 tournament. You are a PARSER of the real TxLINE tournament data below — every market must follow from it.
+    const prompt = `You author prediction markets for the remaining FIFA World Cup 2026 tournament. You are a PARSER of the real TxLINE bracket data below — every market must follow from it.
 STRICT RULES:
 - Output ONLY JSON matching: {"markets":[{"slug","question","yesLabel","noLabel","tier","rule","rationale"}]}
-- tier "chain" = resolvable purely from the final's match result. ONLY rule kind: {"kind":"champion","teamId":N} with a team still alive.
-- tier "feed" = settled from aggregated stats. Allowed rule kinds:
-    {"kind":"top-scorer","playerId":N}   — Golden Boot (most goals)
-    {"kind":"fair-play","teamId":N}      — Fair Play Award (best card record: yellow −1, red −3)
-    {"kind":"clean-sheets","teamId":N}   — most clean sheets
-    {"kind":"team-goals","teamId":N}     — most goals scored as a team
-- champion teamId MUST be from this list of teams still alive: ${JSON.stringify(teams)}
-- playerId MUST be from these real current scorers: ${JSON.stringify(topScorers.map((s) => ({ playerId: s.playerId, name: s.name, team: s.team, goals: s.goals })))}
-- fair-play/clean-sheets/team-goals teamId MUST come from these real tournament aggregates (pick plausible leaders, not no-hopers): ${JSON.stringify(aggregates)}
-- NEVER invent teams, players, or award markets that require FIFA votes (no Golden Ball — nothing in the data can decide it).
+- ONLY tier "chain" with rule {"kind":"champion","teamId":N} — resolvable purely from the final's match result.
+- teamId MUST be from this list of teams still alive: ${JSON.stringify(teams)}
+- NEVER propose tournament award markets (Golden Boot, Golden Ball, Fair Play, top scorer, most goals): the data feed's coverage window cannot see the whole tournament, so nothing can settle them truthfully.
 - Skip slugs already used: ${JSON.stringify(existingSlugs)}
-- Max 8 markets. Questions punchy, ≤100 chars, and MUST name the team/player.`;
+- Max 8 markets. Questions punchy, ≤100 chars, and MUST name the team.`;
     const text = await geminiGenerate(prompt);
     if (!text) return [];
     try {
@@ -713,10 +602,21 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
     await refreshStaleFixtures();
     const teams = await aliveTeams();
     if (!teams.length) return false;
-    await updateScorers();
-    const topScorers = (await db.query.scorers.findMany()).sort((a, b) => b.goals - a.goals);
+    await updateScorers(); // still feeds the (clearly-disclaimed) scorer table
 
-    const existing = (await db.query.markets.findMany()).filter((m) => m.origin === 'ai');
+    // Retire the tournament award markets shipped before the coverage-window
+    // realization (they never had pools, so deletion strands nothing).
+    const allMarkets = await db.query.markets.findMany();
+    for (const m of allMarkets) {
+      if (m.id.startsWith('wc:') && m.marketClass === 'B') {
+        await db.delete(schema.markets).where(eq(schema.markets.id, m.id));
+        console.log(`[ai-markets] removed unsound award market ${m.id}`);
+      }
+    }
+
+    const existing = allMarkets.filter(
+      (m) => m.origin === 'ai' && !(m.id.startsWith('wc:') && m.marketClass === 'B'),
+    );
     const existingSlugs = existing.map((m) => m.slug);
     // Dedupe on the RULE, not the slug — the same market under a different
     // wording is still the same market and must not ship twice.
@@ -731,13 +631,10 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
       }),
     );
     const teamIds = new Set(teams.map((t) => t.teamId));
-    const playerIds = new Set(topScorers.map((s) => s.playerId));
-    const aggregates = await teamAggregates();
-    const aggregateTeamIds = new Set(aggregates.map((t) => t.teamId));
 
     const proposals = [
-      ...deterministicProposals(teams, topScorers, aggregates),
-      ...(await aiProposals(teams, topScorers, existingSlugs, aggregates)),
+      ...deterministicProposals(teams),
+      ...(await aiProposals(teams, existingSlugs)),
     ];
 
     const now = Date.now();
@@ -745,21 +642,13 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
       if (existingSlugs.includes(p.slug)) continue;
       if (existingRules.has(JSON.stringify(p.rule))) continue;
       // Hard validation against reality — an LLM cannot ship what isn't real.
-      // Champion needs a team still alive; award kinds need a team that has
-      // real aggregate data in the tournament.
-      if (p.rule.kind === 'champion' && !teamIds.has(p.rule.teamId)) continue;
-      if ('teamId' in p.rule && p.rule.kind !== 'champion' && !aggregateTeamIds.has(p.rule.teamId))
-        continue;
-      if ('playerId' in p.rule && !playerIds.has(p.rule.playerId)) continue;
-      if (p.tier === 'chain' && p.rule.kind !== 'champion') continue;
-      if (p.tier === 'feed' && p.rule.kind === 'champion') continue;
+      // Only champion markets are sound at tournament level: the coverage
+      // window cannot see the whole tournament, so award aggregates are out.
+      if (p.rule.kind !== 'champion' || p.tier !== 'chain') continue;
+      if (!teamIds.has(p.rule.teamId)) continue;
       // Question text must actually name the real entity it settles on.
       const rule = p.rule;
-      const teamName =
-        'teamId' in rule
-          ? (teams.find((t) => t.teamId === rule.teamId)?.name ??
-            aggregates.find((t) => t.teamId === rule.teamId)?.name ?? null)
-          : null;
+      const teamName = teams.find((t) => t.teamId === rule.teamId)?.name ?? null;
       if (teamName && !p.question.toLowerCase().includes(teamName.toLowerCase())) continue;
 
       await db
@@ -768,7 +657,7 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
           id: `wc:${p.slug}`,
           fixtureId: 0, // tournament-level; attaches to the deciding fixture later
           slug: p.slug,
-          marketClass: p.tier === 'chain' ? 'C' : 'B',
+          marketClass: 'C',
           question: p.question,
           yesLabel: p.yesLabel,
           noLabel: p.noLabel,
@@ -776,19 +665,7 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
           termsHash: `tournament:${p.slug}`,
           lockRule: 'kickoff',
           resolutionMethod:
-            p.tier === 'chain'
-              ? 'Attaches to the deciding fixture (final) and settles by its on-chain Merkle proof'
-              : {
-                  'top-scorer':
-                    'Golden Boot — most tournament goals, from aggregated TxLINE PlayerStats — NOT chain-proven',
-                  'fair-play':
-                    'Fair Play Award — best card record (yellow −1, red −3) from aggregated TxLINE card stats — NOT chain-proven',
-                  'clean-sheets':
-                    'Most clean sheets, counted from aggregated TxLINE goal stats — NOT chain-proven',
-                  'team-goals':
-                    'Most team goals, summed from aggregated TxLINE goal stats — NOT chain-proven',
-                  champion: 'Feed-attested — NOT chain-proven',
-                }[p.rule.kind],
+            'Attaches to the deciding fixture (final) and settles by its on-chain Merkle proof',
           state: 'Open',
           lockTs: now + 60 * 86_400_000, // re-set when the deciding fixture attaches
           resolveDeadlineTs: now + 90 * 86_400_000,
@@ -820,23 +697,6 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
       } catch {
         /* ignore malformed terms */
       }
-    }
-
-    // Player names can arrive after a market was authored — refresh labels.
-    for (const m of existing.filter((m) => m.marketClass === 'B' && m.question.includes('Player #'))) {
-      const rule = (JSON.parse(m.termsJson) as { tournamentRule?: TournamentRule }).tournamentRule;
-      if (rule?.kind !== 'top-scorer') continue;
-      const s = topScorers.find((x) => x.playerId === rule.playerId);
-      if (!s?.name) continue;
-      await db
-        .update(schema.markets)
-        .set({
-          question: `${s.name} (${s.team}) to win the Golden Boot?`,
-          yesLabel: s.name,
-          updatedAt: now,
-        })
-        .where(eq(schema.markets.id, m.id));
-      console.log(`[ai-markets] refreshed label ${m.slug} → ${s.name}`);
     }
 
     // Attach champion markets to the final once exactly one WC fixture remains.
@@ -906,51 +766,6 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
       }
     }
 
-    // Tournament over: settle every feed-tier award market from the final
-    // TxLINE aggregates. Ties settle YES for every tied leader — the only
-    // reading the data itself can prove (we can't apply FIFA's unprovable
-    // tiebreakers like assists or jury decisions).
-    if (remaining.length === 0 && aggregates.length) {
-      const feedMarkets = (await db.query.markets.findMany()).filter(
-        (m) =>
-          m.origin === 'ai' &&
-          m.marketClass === 'B' &&
-          !['Settled', 'Void'].includes(m.state),
-      );
-      const maxPlayerGoals = Math.max(0, ...topScorers.map((s) => s.goals));
-      const maxFairPlay = Math.max(...aggregates.map((t) => t.fairPlayPoints));
-      const maxCleanSheets = Math.max(0, ...aggregates.map((t) => t.cleanSheets));
-      const maxTeamGoals = Math.max(0, ...aggregates.map((t) => t.goals));
-      for (const m of feedMarkets) {
-        let rule: TournamentRule | undefined;
-        try {
-          rule = (JSON.parse(m.termsJson) as { tournamentRule?: TournamentRule }).tournamentRule;
-        } catch {
-          continue;
-        }
-        if (!rule) continue;
-        let winnerYes: boolean | null = null;
-        if (rule.kind === 'top-scorer') {
-          const s = topScorers.find((x) => x.playerId === rule.playerId);
-          winnerYes = !!s && maxPlayerGoals > 0 && s.goals === maxPlayerGoals;
-        } else if (rule.kind === 'fair-play') {
-          const t = aggregates.find((x) => x.teamId === rule.teamId);
-          winnerYes = !!t && t.fairPlayPoints === maxFairPlay;
-        } else if (rule.kind === 'clean-sheets') {
-          const t = aggregates.find((x) => x.teamId === rule.teamId);
-          winnerYes = !!t && maxCleanSheets > 0 && t.cleanSheets === maxCleanSheets;
-        } else if (rule.kind === 'team-goals') {
-          const t = aggregates.find((x) => x.teamId === rule.teamId);
-          winnerYes = !!t && maxTeamGoals > 0 && t.goals === maxTeamGoals;
-        }
-        if (winnerYes === null) continue;
-        await db
-          .update(schema.markets)
-          .set({ state: 'Settled', winnerYes, evidenceTs: now, updatedAt: now })
-          .where(eq(schema.markets.id, m.id));
-        console.log(`[ai-markets] award settled ${m.slug} → ${winnerYes ? 'YES' : 'NO'}`);
-      }
-    }
     return true;
   }
 
