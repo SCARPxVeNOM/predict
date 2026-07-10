@@ -58,6 +58,18 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
           // Root batch not posted yet — stay in AwaitingRoot, retry next tick.
           return;
         }
+        if (/EvidenceTooEarly/.test(s)) {
+          // The market's lock postdates every match record (e.g. authored
+          // against a stale replayed status) — no proof can ever satisfy it.
+          // Void in DB now; the on-chain void + refunds happen at deadline.
+          await db
+            .update(schema.markets)
+            .set({ state: 'Void', updatedAt: Date.now() })
+            .where(eq(schema.markets.id, m.id));
+          bus.emit('market', { id: m.id, state: 'Void' });
+          console.log(`[settler] ${m.id} unresolvable (EvidenceTooEarly) — voided`);
+          return;
+        }
         throw err;
       }
     } else {
