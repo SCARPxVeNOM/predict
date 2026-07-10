@@ -51,7 +51,11 @@ export default function MarketCard({
           <span className={`tag-chip ${hot ? 'hot' : ''}`}>{hot ? '🔥 Hot' : '📈 Trending'}</span>
         )}
         <span className={`class-chip ${m.marketClass}`} title={m.resolutionMethod}>
-          {m.marketClass === 'A' ? 'CHAIN-VERIFIED' : 'FEED-RESOLVED'}
+          {m.marketClass === 'A'
+            ? 'CHAIN-VERIFIED'
+            : m.marketClass === 'C'
+              ? 'CHAIN-COMPOSED'
+              : 'FEED-RESOLVED'}
         </span>
       </div>
 

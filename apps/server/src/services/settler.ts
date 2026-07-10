@@ -78,6 +78,29 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     }
   }
 
+  /**
+   * Regenerate the receipt for an already-Settled market that lost its row
+   * (DB recovery reconstructs markets from chain, but receipts only exist in
+   * the DB). Same proof path as live settling, no on-chain write.
+   */
+  async function backfillReceipt(m: typeof schema.markets.$inferSelect) {
+    const terms = JSON.parse(m.termsJson) as PlainTerms;
+    const snaps = await ctx.txline.scoresSnapshot(m.fixtureId);
+    const withStats = snaps.filter((s) => s.Stats && Object.keys(s.Stats).length > 0);
+    if (!withStats.length) return;
+    const deciding = withStats.reduce((a, b) => (b.Seq > a.Seq ? b : a));
+    const val = await ctx.txline.statValidation(
+      m.fixtureId,
+      deciding.Seq,
+      terms.statAKey,
+      terms.statBKey ?? undefined,
+    );
+    const bundle = toStatProofBundle(val);
+    const { pda: rootPda, epochDay: day } = rootPdaForBundle(bundle);
+    await afterResolve(m, terms, val, deciding.Seq, m.resolveTx, day, rootPda.toBase58(), true);
+    console.log(`[settler] receipt backfilled for ${m.id}`);
+  }
+
   async function afterResolve(
     m: typeof schema.markets.$inferSelect,
     terms: PlainTerms,
@@ -86,6 +109,7 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     resolveTx: string | null,
     rootDay: number,
     rootPda: string,
+    quiet = false,
   ) {
     const now = Date.now();
 
@@ -181,18 +205,20 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
       })
       .where(eq(schema.markets.id, m.id));
 
-    await db.insert(schema.notifications).values({
-      wallet: null,
-      kind: 'market_resolved',
-      payloadJson: JSON.stringify({
-        marketId: m.id,
-        winnerYes,
-        explorer: resolveTx ? DEVNET.explorerTxUrl(resolveTx) : null,
-      }),
-      createdAt: now,
-    });
-    bus.emit('market', { id: m.id, state: 'Settled', winnerYes });
-    console.log(`[settler] settled ${m.id}: ${winnerYes ? 'YES' : 'NO'} — ${explanation}`);
+    if (!quiet) {
+      await db.insert(schema.notifications).values({
+        wallet: null,
+        kind: 'market_resolved',
+        payloadJson: JSON.stringify({
+          marketId: m.id,
+          winnerYes,
+          explorer: resolveTx ? DEVNET.explorerTxUrl(resolveTx) : null,
+        }),
+        createdAt: now,
+      });
+      bus.emit('market', { id: m.id, state: 'Settled', winnerYes });
+      console.log(`[settler] settled ${m.id}: ${winnerYes ? 'YES' : 'NO'} — ${explanation}`);
+    }
   }
 
   async function voidOne(m: typeof schema.markets.$inferSelect) {
@@ -238,6 +264,26 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
             console.error(`[settler] ${m.id}: ${String(err).slice(0, 300)}`);
           }
         }
+        // Receipt backfill: settled markets recovered from chain have no
+        // receipt row yet — regenerate a few per tick (proof-API budget).
+        const settledMarkets = await db.query.markets.findMany({
+          where: inArray(schema.markets.state, ['Settled']),
+        });
+        const withReceipts = new Set(
+          (await db.query.receipts.findMany()).map((r) => r.marketId),
+        );
+        let backfilled = 0;
+        for (const m of settledMarkets) {
+          if (backfilled >= 3) break;
+          if (!m.marketPda || m.fixtureId <= 0 || withReceipts.has(m.id)) continue;
+          try {
+            await backfillReceipt(m);
+            backfilled += 1;
+          } catch (err) {
+            console.error(`[settler] receipt backfill ${m.id}: ${String(err).slice(0, 200)}`);
+          }
+        }
+
         // Void overdue markets (root never came / abandoned).
         const overdue = await db.query.markets.findMany({
           where: inArray(schema.markets.state, ['Open', 'Locked', 'InPlay', 'AwaitingRoot', 'Void']),

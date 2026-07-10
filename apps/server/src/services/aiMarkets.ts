@@ -111,6 +111,57 @@ interface AliveTeam {
 export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
   let stopped = false;
 
+  /**
+   * Fixtures that finished OUTSIDE the indexer's hydration window (e.g. before
+   * a fresh deployment) keep a stale/null statusId forever — the SSE stream
+   * only carries new records. Pull their final snapshot so bracket state,
+   * scorers and aggregates are computed from reality.
+   */
+  async function refreshStaleFixtures(): Promise<void> {
+    const fixtures = await db.query.fixtures.findMany();
+    const stale = fixtures.filter(
+      (f) =>
+        f.competitionId === 72 &&
+        f.startTime < Date.now() - 3 * 3600_000 &&
+        !(f.statusId !== null && FINISHED_STATUSES.has(f.statusId)),
+    );
+    for (const f of stale) {
+      try {
+        const snaps = await ctx.txline.scoresSnapshot(f.fixtureId);
+        if (!snaps.length) continue;
+        const statusRecs = snaps.filter(
+          (s) => s.StatusId !== undefined && s.StatusId >= 1 && s.StatusId <= 19,
+        );
+        const lastStatus = statusRecs.length
+          ? statusRecs.reduce((a, b) => (b.Seq > a.Seq ? b : a))
+          : null;
+        const withStats = snaps.filter((s) => s.Stats && Object.keys(s.Stats).length > 0);
+        const lastStats = withStats.length
+          ? withStats.reduce((a, b) => (b.Seq > a.Seq ? b : a))
+          : null;
+        const withScore = snaps.filter((s) => s.Score);
+        const lastScore = withScore.length
+          ? withScore.reduce((a, b) => (b.Seq > a.Seq ? b : a))
+          : null;
+        if (!lastStatus && !lastStats && !lastScore) continue;
+        await db
+          .update(schema.fixtures)
+          .set({
+            ...(lastStatus ? { statusId: lastStatus.StatusId } : {}),
+            ...(lastStats ? { statsJson: JSON.stringify(lastStats.Stats) } : {}),
+            ...(lastScore ? { scoreJson: JSON.stringify(lastScore.Score) } : {}),
+            updatedAt: Date.now(),
+          })
+          .where(eq(schema.fixtures.fixtureId, f.fixtureId));
+        console.log(
+          `[ai-markets] refreshed stale fixture ${f.fixtureId} → status ${lastStatus?.StatusId ?? '?'}`,
+        );
+      } catch {
+        /* snapshot unavailable — try again next tick */
+      }
+    }
+  }
+
   /** Winners of finished fixtures + participants of unfinished ones. */
   async function aliveTeams(): Promise<AliveTeam[]> {
     const fixtures = await db.query.fixtures.findMany();
@@ -650,6 +701,7 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
   /** Returns false when there was nothing to work on yet (fresh DB before the
    * first fixtures sync) so the loop retries soon instead of sleeping 6h. */
   async function tick(): Promise<boolean> {
+    await refreshStaleFixtures();
     const teams = await aliveTeams();
     if (!teams.length) return false;
     await updateScorers();
@@ -739,6 +791,26 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         .onConflictDoNothing();
       existingSlugs.push(p.slug);
       console.log(`[ai-markets] authored ${p.slug} (${p.tier}): ${p.question}`);
+    }
+
+    // A champion market for a team knocked out of the bracket settles NO the
+    // moment elimination is a fact — no reason to hold it until the final.
+    const aliveIds = new Set(teams.map((t) => t.teamId));
+    for (const m of existing.filter(
+      (m) => m.marketClass === 'C' && m.fixtureId === 0 && m.state === 'Open',
+    )) {
+      try {
+        const r = (JSON.parse(m.termsJson) as { tournamentRule?: TournamentRule }).tournamentRule;
+        if (r?.kind === 'champion' && !aliveIds.has(r.teamId)) {
+          await db
+            .update(schema.markets)
+            .set({ state: 'Settled', winnerYes: false, updatedAt: now })
+            .where(eq(schema.markets.id, m.id));
+          console.log(`[ai-markets] ${m.slug} settled NO — team eliminated`);
+        }
+      } catch {
+        /* ignore malformed terms */
+      }
     }
 
     // Player names can arrive after a market was authored — refresh labels.

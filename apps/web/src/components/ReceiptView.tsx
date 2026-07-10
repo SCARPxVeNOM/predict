@@ -15,12 +15,23 @@ export default function ReceiptView({ marketId }: { marketId: string }) {
   const [result, setResult] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: receipt } = useQuery({
+  const { data: receipt, isPending, isError } = useQuery({
     queryKey: ['receipt', marketId],
     queryFn: () => api.receipt(marketId),
+    retry: 1,
+    refetchInterval: (q) => (q.state.data ? false : 30_000),
   });
 
-  if (!receipt) return <div className="receipt">Loading receipt…</div>;
+  if (isPending) return <div className="receipt">Loading receipt…</div>;
+  if (isError || !receipt) {
+    return (
+      <div className="receipt">
+        🧾 The receipt for this market is being regenerated from the on-chain proof — it appears
+        here automatically within a minute or two. The settlement itself is already final
+        on-chain.
+      </div>
+    );
+  }
   const proven = JSON.parse(receipt.provenJson) as {
     statA: { key: number; value: number; period: number };
     statB: { key: number; value: number; period: number } | null;
