@@ -23,7 +23,13 @@ export default function Live({ search }: { search: string }) {
 
   const q = search.trim().toLowerCase();
   const visible = useMemo(() => {
-    let rows = markets.filter((m) => fixtureById.has(m.fixtureId));
+    // Auto-archive: cards from matches that kicked off >12h ago drop off the
+    // Live page (settled positions/receipts stay on Portfolio forever).
+    const cutoff = Date.now() - 12 * 3600_000;
+    let rows = markets.filter((m) => {
+      const f = fixtureById.get(m.fixtureId);
+      return f !== undefined && f.startTime > cutoff;
+    });
     if (q) {
       rows = rows.filter((m) => {
         const f = fixtureById.get(m.fixtureId)!;

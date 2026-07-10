@@ -699,11 +699,19 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
       }
     }
 
-    // Attach champion markets to the final once exactly one WC fixture remains.
+    // Attach champion markets to the final as soon as it is identifiable:
+    // either one fixture remains, or exactly two teams are still alive and a
+    // scheduled fixture pairs them (robust to a third-place match existing).
     const fixtures = await db.query.fixtures.findMany();
     const remaining = fixtures.filter((f) => f.competitionId === 72 && !fixtureDone(f));
-    if (remaining.length === 1) {
-      const final = remaining[0]!;
+    let finalFixture = remaining.length === 1 ? remaining[0]! : null;
+    if (!finalFixture && teams.length === 2) {
+      const aliveSet = new Set(teams.map((t) => t.teamId));
+      finalFixture =
+        remaining.find((f) => aliveSet.has(f.homeId) && aliveSet.has(f.awayId)) ?? null;
+    }
+    if (finalFixture) {
+      const final = finalFixture;
       const detached = (await db.query.markets.findMany()).filter(
         (m) => m.origin === 'ai' && m.fixtureId === 0 && m.marketClass === 'C' && m.state === 'Open',
       );

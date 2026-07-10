@@ -1,6 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api.js';
+import { api, API_BASE } from '../lib/api.js';
+import { flagSrc } from '../lib/flags.js';
 import MarketCard from '../components/MarketCard.js';
+
+interface ScorerRow {
+  playerId: number;
+  name: string | null;
+  team: string | null;
+  goals: number;
+}
 
 /**
  * Tournament-level markets. ONLY markets the data can truthfully settle live
@@ -15,6 +23,14 @@ import MarketCard from '../components/MarketCard.js';
 export default function Predictions() {
   const { data: markets = [] } = useQuery({ queryKey: ['markets'], queryFn: () => api.markets() });
   const { data: fixtures = [] } = useQuery({ queryKey: ['fixtures'], queryFn: () => api.fixtures() });
+  const { data: scorers = [] } = useQuery<ScorerRow[]>({
+    queryKey: ['scorers'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/tournament/scorers`);
+      return (await res.json()) as ScorerRow[];
+    },
+    refetchInterval: 60_000,
+  });
 
   const tournament = markets.filter((m) => m.id.startsWith('wc:'));
   // Live contenders first; eliminated (settled) teams sink to the end, dimmed.
@@ -90,6 +106,45 @@ export default function Predictions() {
           </div>
         )}
       </div>
+
+      {scorers.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Knockout-round scorers</h2>
+          </div>
+          <div className="panel-sub">
+            Goals from matches inside our licensed coverage window (quarterfinals onward). This is
+            NOT the official Golden Boot tally — the feed does not retain group-stage player
+            stats, which is also why no Golden Boot market exists here: nothing we hold could
+            settle it truthfully.
+          </div>
+          <table className="lb">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Player</th>
+                <th>Team</th>
+                <th>Goals (knockouts)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorers.slice(0, 10).map((s, i) => (
+                <tr key={s.playerId}>
+                  <td>{i + 1}</td>
+                  <td style={{ fontWeight: 600 }}>{s.name ?? `Player #${s.playerId}`}</td>
+                  <td>
+                    {s.team && flagSrc(s.team) && (
+                      <img className="flag" src={flagSrc(s.team)!} alt="" style={{ marginRight: 6 }} />
+                    )}
+                    {s.team}
+                  </td>
+                  <td style={{ fontWeight: 700 }}>{s.goals}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   );
 }
