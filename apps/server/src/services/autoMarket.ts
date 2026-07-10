@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { epochDay } from '@groundtruth/shared';
 import { classAMarkets } from '@groundtruth/catalog';
 import { createMarket, marketPda, vaultPda } from '@groundtruth/chain';
@@ -101,6 +101,30 @@ export function startAutoMarketEngine(ctx: Ctx, pool: Program<GroundtruthPool>) 
   let stopped = false;
 
   async function tick() {
+    // Retire legacy period-scoped markets minted with terms.period != 0 —
+    // no proof leaf can ever match them (leaf period is always 0 at the
+    // deciding record; the half lives in the offset stat key), so they can
+    // never resolve. Void in DB now; the settler completes the on-chain void
+    // (and refunds) once each market passes its resolve deadline.
+    const active = await db.query.markets.findMany({
+      where: inArray(schema.markets.state, ['Open', 'Locked', 'InPlay', 'AwaitingRoot']),
+    });
+    for (const m of active) {
+      if (m.fixtureId <= 0) continue;
+      try {
+        const t = JSON.parse(m.termsJson) as { period?: number };
+        if (typeof t.period === 'number' && t.period !== 0) {
+          await db
+            .update(schema.markets)
+            .set({ state: 'Void', updatedAt: Date.now() })
+            .where(eq(schema.markets.id, m.id));
+          console.log(`[auto-market] retired unresolvable period-market ${m.id}`);
+        }
+      } catch {
+        /* non-JSON terms — leave alone */
+      }
+    }
+
     const fixtures = await ctx.txline.fixturesSnapshot({ startEpochDay: epochDay() - 1 });
     const covered = fixtures.filter((f) => config.competitionIds.includes(f.CompetitionId));
     const now = Date.now();

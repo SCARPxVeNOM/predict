@@ -50,11 +50,16 @@ describe('classAMarkets', () => {
     expect(btts.andTerms![0]).toMatchObject({ statAKey: 2, predicate: { threshold: 0 } });
   });
 
-  it('period-scoped keys follow (period*1000)+base', () => {
+  it('period-scoped keys follow (period*1000)+base with terms.period 0', () => {
     expect(statKey(1, 1)).toBe(1001);
     expect(statKey(8, 5)).toBe(5008);
     const h1 = classAMarkets(fx, 1);
-    expect(h1.find((d) => d.slug === 'ou-goals-0.5-p1')!.terms.statAKey).toBe(1001);
+    const ou = h1.find((d) => d.slug === 'ou-goals-0.5-h1')!;
+    expect(ou.terms.statAKey).toBe(1001);
+    // Verified on devnet (fixture 18218149): the proof leaf's period field is
+    // 0 at the deciding record — the half lives ONLY in the offset key, so
+    // terms.period must be 0 or the pool program rejects with StatMismatch.
+    expect(ou.terms.period).toBe(0);
   });
 });
 

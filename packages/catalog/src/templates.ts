@@ -66,10 +66,14 @@ export interface FixtureInfo {
 export function classAMarkets(fx: FixtureInfo, period: StatPeriod = 0): MarketDef[] {
   const p = period;
   const tag = p === 0 ? '' : p === 1 ? ' (1st half)' : ' (2nd half)';
-  const suffix = p === 0 ? '' : `-p${p}`;
+  const suffix = p === 0 ? '' : `-h${p}`;
   const defs: MarketDef[] = [];
 
   // Over/Under total goals — X.5 lines expressed as "> X".
+  // NOTE (verified on devnet, fixture 18218149): the period scope lives
+  // entirely in the offset stat KEY (1001 = H1 P1 goals); the proof leaf's
+  // `period` field is 0 at the deciding (post-final) record. On-chain terms
+  // must therefore always carry period 0 or `resolve` throws StatMismatch.
   for (const line of p === 0 ? [1.5, 2.5, 3.5] : [0.5, 1.5]) {
     defs.push(
       base(
@@ -77,7 +81,7 @@ export function classAMarkets(fx: FixtureInfo, period: StatPeriod = 0): MarketDe
         `ou-goals-${line}${suffix}`,
         `Over ${line} total goals${tag}?`,
         {
-          period: p,
+          period: 0,
           statAKey: statKey(STAT.P1_GOALS, p),
           statBKey: statKey(STAT.P2_GOALS, p),
           predicate: { threshold: Math.floor(line), comparison: 'GreaterThan' },

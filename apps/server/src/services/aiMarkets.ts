@@ -566,9 +566,11 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
           continue;
         }
 
+        // Period scope lives in the offset stat key; on-chain terms.period
+        // must be 0 to match the proof leaf (see catalog templates note).
         const terms: PlainTerms = {
           fixtureId: p.fixtureId,
-          period: p.period,
+          period: 0,
           statAKey: p.period * 1000 + p.statAKey,
           statBKey: p.statBKey === null ? null : p.period * 1000 + p.statBKey,
           predicate: { threshold: p.threshold, comparison: p.comparison },
