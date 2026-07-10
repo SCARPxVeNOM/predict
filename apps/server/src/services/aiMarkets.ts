@@ -457,12 +457,22 @@ STRICT RULES:
 
   async function liveAiTick() {
     const now = Date.now();
-    // Only matches that are actually live right now.
+    // Only matches that are actually live right now. The freshness checks
+    // matter: during snapshot hydration after a restart the indexer replays
+    // OLD records, and a transient stale "H2" status once made the author
+    // mint an in-play market after full time — its lock postdated every
+    // match record, so it could never resolve (EvidenceTooEarly).
     const live = (await db.query.fixtures.findMany()).filter(
       (f) =>
         f.competitionId === 72 &&
         f.statusId !== null &&
-        [SOCCER_STATUS.H1, SOCCER_STATUS.HT, SOCCER_STATUS.H2].includes(f.statusId as 2 | 3 | 4),
+        [SOCCER_STATUS.H1, SOCCER_STATUS.HT, SOCCER_STATUS.H2].includes(f.statusId as 2 | 3 | 4) &&
+        // A soccer match is over well within 2.5h of kickoff.
+        now < f.startTime + 150 * 60_000 &&
+        // The feed must be actively producing records (60s delay + margin) —
+        // rules out hydration replays and dead feeds.
+        f.lastTs !== null &&
+        now - f.lastTs < 10 * 60_000,
     );
     if (!live.length) return;
 
@@ -559,6 +569,9 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         const q = p.question.toLowerCase();
         const familyWord = { goals: 'goal', yellows: 'card', reds: 'card', corners: 'corner' }[famA];
         if (!q.includes(teamP1.toLowerCase()) && !q.includes(teamP2.toLowerCase()) && !q.includes(familyWord)) continue;
+        // "total/combined/both teams" wording must actually sum both teams —
+        // a single-team predicate under a "total" question is a wrong market.
+        if (/\btotal\b|\bcombined\b|\bboth teams\b/.test(q) && p.op !== 'Add') continue;
         // The bookmaker guard: decided or one-sided lines never ship.
         const rejection = inPlayGuard(p, stats, f.statusId!, clock);
         if (rejection) {
