@@ -73,26 +73,31 @@ export default function MarketCard({
         )}
       </div>
 
-      <Sparkline marketId={m.id} />
+      {/* Pool-less markets (unattached outrights, feed-attested awards) have
+          no odds, no volume and no price history — rendering dead controls
+          just makes the page look broken. */}
+      {m.marketPda && <Sparkline marketId={m.id} />}
 
-      <div className="oddsrow">
-        <button
-          className={`oddbtn yes ${side === true ? 'picked' : ''}`}
-          disabled={!open || !m.marketPda}
-          onClick={() => setSide(true)}
-        >
-          <span className="side-l">{m.yesLabel}</span>
-          <span className="odd-v">{odds.yes}</span>
-        </button>
-        <button
-          className={`oddbtn no ${side === false ? 'picked' : ''}`}
-          disabled={!open || !m.marketPda}
-          onClick={() => setSide(false)}
-        >
-          <span className="side-l">{m.noLabel}</span>
-          <span className="odd-v">{odds.no}</span>
-        </button>
-      </div>
+      {m.marketPda && (
+        <div className="oddsrow">
+          <button
+            className={`oddbtn yes ${side === true ? 'picked' : ''}`}
+            disabled={!open}
+            onClick={() => setSide(true)}
+          >
+            <span className="side-l">{m.yesLabel}</span>
+            <span className="odd-v">{odds.yes}</span>
+          </button>
+          <button
+            className={`oddbtn no ${side === false ? 'picked' : ''}`}
+            disabled={!open}
+            onClick={() => setSide(false)}
+          >
+            <span className="side-l">{m.noLabel}</span>
+            <span className="odd-v">{odds.no}</span>
+          </button>
+        </div>
+      )}
 
       {side !== null && open && (
         <div className="stakebar">
@@ -106,9 +111,7 @@ export default function MarketCard({
       {msg && <div className="mini-note">{msg}</div>}
 
       <div className="mcard-foot">
-        <span>
-          {usdt(vol)} USDT Vol. · 👥 {m.participantCount}
-        </span>
+        <span>{m.marketPda ? `${usdt(vol)} USDT Vol. · 👥 ${m.participantCount}` : ''}</span>
         <span className={`state-chip ${m.state}`}>{m.state}</span>
       </div>
 
@@ -116,14 +119,29 @@ export default function MarketCard({
         <>
           <div className="mcard-foot">
             <span>
-              Winner:{' '}
-              <b style={{ color: m.winnerYes ? 'var(--yes)' : 'var(--no)' }}>
-                {m.winnerYes ? m.yesLabel : m.noLabel}
-              </b>
+              {m.winnerYes === false && m.marketClass !== 'A' && !m.marketPda ? (
+                <b style={{ color: 'var(--no)' }}>Eliminated</b>
+              ) : (
+                <>
+                  Winner:{' '}
+                  <b style={{ color: m.winnerYes ? 'var(--yes)' : 'var(--no)' }}>
+                    {m.winnerYes ? m.yesLabel : m.noLabel}
+                  </b>
+                </>
+              )}
             </span>
-            <button className="ghost" onClick={() => setShowReceipt((v) => !v)}>
-              {showReceipt ? 'Hide receipt' : 'Receipt'}
-            </button>
+            {/* A receipt exists only when settlement went through a Merkle
+                proof (pool markets + class-A composites). Bracket- or
+                feed-settled tournament markets have no proof to show. */}
+            {(m.marketClass === 'A' || m.marketPda) ? (
+              <button className="ghost" onClick={() => setShowReceipt((v) => !v)}>
+                {showReceipt ? 'Hide receipt' : 'Receipt'}
+              </button>
+            ) : (
+              <span className="mini-note" title={m.resolutionMethod}>
+                {m.marketClass === 'C' ? 'settled by bracket result' : 'settled from feed stats'}
+              </span>
+            )}
           </div>
           {showReceipt && <ReceiptView marketId={m.id} />}
         </>

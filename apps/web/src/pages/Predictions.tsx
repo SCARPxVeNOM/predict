@@ -29,7 +29,10 @@ export default function Predictions() {
   });
 
   const tournament = markets.filter((m) => m.id.startsWith('wc:'));
-  const outrights = tournament.filter((m) => m.marketClass === 'C');
+  // Live contenders first; eliminated (settled) teams sink to the end, dimmed.
+  const outrights = tournament
+    .filter((m) => m.marketClass === 'C')
+    .sort((a, b) => Number(a.state === 'Settled') - Number(b.state === 'Settled'));
   const feed = tournament.filter((m) => m.marketClass === 'B');
   // Award categories are keyed by slug prefix (server-side rule kinds).
   const scorerMarkets = feed.filter((m) => m.slug.startsWith('golden-boot'));
@@ -106,7 +109,7 @@ export default function Predictions() {
         ) : (
           <div className="cards">
             {outrights.map((m) => (
-              <div key={m.id}>
+              <div key={m.id} style={m.state === 'Settled' ? { opacity: 0.55 } : undefined}>
                 <MarketCard m={m} />
                 {!m.marketPda && m.state === 'Open' && (
                   <div className="mini-note" style={{ marginTop: 6 }}>
