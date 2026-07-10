@@ -18,6 +18,7 @@ interface ScorerRow {
  */
 export default function Predictions() {
   const { data: markets = [] } = useQuery({ queryKey: ['markets'], queryFn: () => api.markets() });
+  const { data: fixtures = [] } = useQuery({ queryKey: ['fixtures'], queryFn: () => api.fixtures() });
   const { data: scorers = [] } = useQuery<ScorerRow[]>({
     queryKey: ['scorers'],
     queryFn: async () => {
@@ -52,8 +53,43 @@ export default function Predictions() {
   const knownPrefixes = ['golden-boot', 'fair-play', 'clean-sheets', 'team-goals'];
   const otherFeed = feed.filter((m) => !knownPrefixes.some((p) => m.slug.startsWith(p)));
 
+  // Stakeable NOW: each remaining knockout tie's winner pools (the same
+  // on-chain markets as the Live page, framed as bracket progression).
+  const FINISHED = [5, 10, 13, 14, 15, 16, 17, 18];
+  const upcoming = fixtures
+    .filter(
+      (f) =>
+        (f.statusId === null || !FINISHED.includes(f.statusId)) &&
+        f.startTime > Date.now() - 3 * 3600_000,
+    )
+    .sort((a, b) => a.startTime - b.startTime);
+  const roadToFinal = upcoming.flatMap((f) =>
+    markets
+      .filter(
+        (m) => m.fixtureId === f.fixtureId && (m.slug === 'home-win' || m.slug === 'away-win'),
+      )
+      .map((m) => ({ m, f })),
+  );
+
   return (
     <>
+      {roadToFinal.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Road to the Final</h2>
+          </div>
+          <div className="panel-sub">
+            Back a team to win their knockout tie — stakeable right now, settled by the match's
+            on-chain Merkle proof. Champion pools open once the final pairing is known.
+          </div>
+          <div className="cards">
+            {roadToFinal.map(({ m, f }) => (
+              <MarketCard key={m.id} m={m} fixture={f} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <h2>Tournament Outrights</h2>
@@ -72,9 +108,10 @@ export default function Predictions() {
             {outrights.map((m) => (
               <div key={m.id}>
                 <MarketCard m={m} />
-                {!m.marketPda && (
+                {!m.marketPda && m.state === 'Open' && (
                   <div className="mini-note" style={{ marginTop: 6 }}>
-                    ⏳ stakes open once the deciding fixture is announced
+                    ⏳ champion stakes open when the final pairing is known — until then, back
+                    them in Road to the Final above
                   </div>
                 )}
               </div>

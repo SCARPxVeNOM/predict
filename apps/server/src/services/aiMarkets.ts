@@ -108,6 +108,21 @@ interface AliveTeam {
   name: string;
 }
 
+/**
+ * Is this match over? Trust a FINISHED status, but ALSO trust the clock: feed
+ * statuses can lag or regress (replayed records), and no soccer match runs
+ * four hours — a fixture that kicked off >4h ago with a recorded score is
+ * done, whatever the status column says. Keeps eliminated teams out of the
+ * bracket even when the status is wrong.
+ */
+function fixtureDone(
+  f: { statusId: number | null; startTime: number; scoreJson: string | null },
+  now = Date.now(),
+): boolean {
+  if (f.statusId !== null && FINISHED_STATUSES.has(f.statusId)) return true;
+  return f.startTime < now - 4 * 3600_000 && !!f.scoreJson;
+}
+
 export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
   let stopped = false;
 
@@ -168,7 +183,7 @@ export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
     const wc = fixtures.filter((f) => f.competitionId === 72);
     const alive = new Map<number, string>();
     for (const f of wc) {
-      const finished = f.statusId !== null && FINISHED_STATUSES.has(f.statusId);
+      const finished = fixtureDone(f);
       if (!finished) {
         alive.set(f.homeId, f.home);
         alive.set(f.awayId, f.away);
@@ -196,9 +211,7 @@ export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
   /** Aggregate real per-match PlayerStats into tournament scorer standings. */
   async function updateScorers(): Promise<void> {
     const fixtures = await db.query.fixtures.findMany();
-    const finished = fixtures.filter(
-      (f) => f.competitionId === 72 && f.statusId !== null && FINISHED_STATUSES.has(f.statusId),
-    );
+    const finished = fixtures.filter((f) => f.competitionId === 72 && fixtureDone(f));
     const totals = new Map<number, { goals: number; teamId: number; team: string; name?: string }>();
     for (const f of finished) {
       try {
@@ -294,11 +307,7 @@ export function startAiMarketAuthor(ctx: Ctx, pool: Program<GroundtruthPool>) {
   async function teamAggregates(): Promise<TeamAggregate[]> {
     const fixtures = await db.query.fixtures.findMany();
     const finished = fixtures.filter(
-      (f) =>
-        f.competitionId === 72 &&
-        f.statusId !== null &&
-        FINISHED_STATUSES.has(f.statusId) &&
-        f.statsJson,
+      (f) => f.competitionId === 72 && fixtureDone(f) && f.statsJson,
     );
     const byTeam = new Map<number, TeamAggregate>();
     const get = (teamId: number, name: string) => {
@@ -832,10 +841,7 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
 
     // Attach champion markets to the final once exactly one WC fixture remains.
     const fixtures = await db.query.fixtures.findMany();
-    const remaining = fixtures.filter(
-      (f) =>
-        f.competitionId === 72 && !(f.statusId !== null && FINISHED_STATUSES.has(f.statusId)),
-    );
+    const remaining = fixtures.filter((f) => f.competitionId === 72 && !fixtureDone(f));
     if (remaining.length === 1) {
       const final = remaining[0]!;
       const detached = (await db.query.markets.findMany()).filter(

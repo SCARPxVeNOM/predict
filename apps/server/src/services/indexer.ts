@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Scores } from '@groundtruth/txline-client';
-import { VOID_STATUSES, decidingStatusFor, SOCCER_STATUS } from '@groundtruth/catalog';
+import { FINISHED_STATUSES, VOID_STATUSES, decidingStatusFor, SOCCER_STATUS } from '@groundtruth/catalog';
 import { db, schema } from '../db/index.js';
 import type { Ctx } from './txline.js';
 import { bus } from './bus.js';
@@ -27,10 +27,22 @@ export function startIndexer(ctx: Ctx) {
     // zeroed clock — only trust values in the documented 1–19 phase range and
     // non-zero clocks, otherwise keep the previous state.
     const rawStatus = record.StatusId;
-    const statusId =
+    let statusId =
       rawStatus !== undefined && rawStatus >= 1 && rawStatus <= 19
         ? rawStatus
         : (fixture.statusId ?? undefined);
+    // Finished is terminal: replayed/late records must never regress a
+    // final status back to a live one (this once resurrected an eliminated
+    // team in the bracket). Void statuses may still override.
+    if (
+      fixture.statusId !== null &&
+      FINISHED_STATUSES.has(fixture.statusId) &&
+      statusId !== undefined &&
+      !FINISHED_STATUSES.has(statusId) &&
+      !VOID_STATUSES.has(statusId)
+    ) {
+      statusId = fixture.statusId;
+    }
     const clockSeconds =
       record.Clock && record.Clock.Seconds > 0 ? record.Clock.Seconds : fixture.clockSeconds;
     await db
