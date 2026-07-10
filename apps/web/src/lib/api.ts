@@ -76,8 +76,13 @@ export interface LeaderboardRow {
   verifiedWins: number;
 }
 
+/** Backend origin for deployed builds (Vite env); dev uses the vite proxy. */
+export const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '')
+  .trim() // env values set via shell pipes can carry stray \r
+  .replace(/\/+$/, '');
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`${path}: ${res.status}`);
   return (await res.json()) as T;
 }
@@ -110,7 +115,7 @@ export function subscribeStream(handlers: {
   onScore?: (e: unknown) => void;
   onMarket?: (e: unknown) => void;
 }): () => void {
-  const es = new EventSource('/api/stream');
+  const es = new EventSource(`${API_BASE}/api/stream`);
   if (handlers.onScore) {
     es.addEventListener('score', (ev) => handlers.onScore!(JSON.parse((ev as MessageEvent).data)));
   }

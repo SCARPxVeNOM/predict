@@ -11,6 +11,9 @@ import { fromPlainTerms } from './terms.js';
 
 export const POOL_PROGRAM_ID = new PublicKey((poolIdl as { address: string }).address);
 
+/** Raw IDL for browser callers (see TXORACLE_IDL note in program.ts). */
+export const POOL_IDL = poolIdl;
+
 const computeIx = () =>
   anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 });
 

@@ -5,32 +5,33 @@ import { DEVNET } from '@groundtruth/shared';
 import {
   claimTx,
   depositTx,
-  createPoolProgram,
   poolPositionPda,
   validateStatView,
   toStatProofBundle,
   rootPdaForBundle,
-  createProgram,
+  POOL_IDL,
+  TXORACLE_IDL,
   type GroundtruthPool,
   type Txoracle,
 } from '@groundtruth/chain';
-import { Keypair } from '@solana/web3.js';
 
 export const connection = new Connection(DEVNET.rpcUrl, 'confirmed');
+
+// IMPORTANT: never route through the chain package's Keypair-based helpers
+// here — they use anchor.Wallet (NodeWallet), which doesn't exist in anchor's
+// browser bundle and crashes production builds with
+// "TypeError: (void 0) is not a constructor".
 
 /** Pool program bound to the connected wallet (for signing). */
 export function poolWith(wallet: AnchorWallet): Program<GroundtruthPool> {
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-  // createPoolProgram takes a Keypair; construct directly with provider here.
-  const idlProgram = createPoolProgram(connection, Keypair.generate());
-  return new Program<GroundtruthPool>(idlProgram.idl, provider);
+  return new Program<GroundtruthPool>(POOL_IDL as unknown as GroundtruthPool, provider);
 }
 
 /** Read-only txoracle program for browser-side Re-verify (spec §9). */
 export function oracleReadonly(wallet: AnchorWallet): Program<Txoracle> {
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-  const p = createProgram(connection, Keypair.generate());
-  return new Program<Txoracle>(p.idl, provider);
+  return new Program<Txoracle>(TXORACLE_IDL as unknown as Txoracle, provider);
 }
 
 export async function sendDeposit(

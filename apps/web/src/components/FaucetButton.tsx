@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { AnchorProvider, Program } from '@coral-xyz/anchor';
+import { AnchorProvider } from '@coral-xyz/anchor';
 import { useAnchorWallet } from '@solana/wallet-adapter-react';
-import { Keypair } from '@solana/web3.js';
-import { createProgram, faucetTx, type Txoracle } from '@groundtruth/chain';
-import { connection } from '../lib/solana.js';
+import { faucetTx } from '@groundtruth/chain';
+import { connection, oracleReadonly } from '../lib/solana.js';
 
 /** Self-serve devnet USDT (spec §14 step 1) — user signs the faucet call. */
 export default function FaucetButton() {
@@ -16,10 +15,22 @@ export default function FaucetButton() {
     setBusy(true);
     setMsg(null);
     try {
-      const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-      const base = createProgram(connection, Keypair.generate());
-      const oracle = new Program<Txoracle>(base.idl, provider);
+      // Fresh wallets have no devnet SOL to pay the faucet tx fee — try a
+      // best-effort airdrop first so the button works for anyone.
+      const lamports = await connection.getBalance(wallet.publicKey);
+      if (lamports < 5_000_000) {
+        setMsg('Requesting devnet SOL…');
+        try {
+          const sig = await connection.requestAirdrop(wallet.publicKey, 1_000_000_000);
+          await connection.confirmTransaction(sig, 'confirmed');
+        } catch {
+          setMsg('Devnet SOL airdrop rate-limited — get SOL at faucet.solana.com first');
+          return;
+        }
+      }
+      const oracle = oracleReadonly(wallet);
       const { tx } = await faucetTx(connection, oracle, wallet.publicKey);
+      const provider = oracle.provider as AnchorProvider;
       const sig = await provider.sendAndConfirm(tx);
       setMsg(`+100 USDT ✓ ${sig.slice(0, 8)}…`);
     } catch (err) {

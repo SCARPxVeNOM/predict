@@ -1,0 +1,8 @@
+node_modules
+.git
+.wallets
+.env
+apps/server/data
+apps/web/dist
+program/target
+scratch

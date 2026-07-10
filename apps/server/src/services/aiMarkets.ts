@@ -632,9 +632,11 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
     }
   }
 
-  async function tick() {
+  /** Returns false when there was nothing to work on yet (fresh DB before the
+   * first fixtures sync) so the loop retries soon instead of sleeping 6h. */
+  async function tick(): Promise<boolean> {
     const teams = await aliveTeams();
-    if (!teams.length) return;
+    if (!teams.length) return false;
     await updateScorers();
     const topScorers = (await db.query.scorers.findMany()).sort((a, b) => b.goals - a.goals);
 
@@ -856,18 +858,22 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         console.log(`[ai-markets] award settled ${m.slug} → ${winnerYes ? 'YES' : 'NO'}`);
       }
     }
+    return true;
   }
 
   const loop = async () => {
     let lastTournamentTick = 0;
     while (!stopped) {
-      // Tournament author: slow cadence (rate-limit budget).
+      // Tournament author: slow cadence (rate-limit budget). A tick with no
+      // fixtures yet (fresh DB before the first sync) retries every minute
+      // instead of sleeping 6h; a crashed tick retries in 5 minutes.
       if (Date.now() - lastTournamentTick >= config.aiTickMs) {
-        lastTournamentTick = Date.now();
         try {
-          await tick();
+          const didWork = await tick();
+          if (didWork) lastTournamentTick = Date.now();
         } catch (err) {
           console.error('[ai-markets] tick failed', String(err).slice(0, 300));
+          lastTournamentTick = Date.now() - config.aiTickMs + 5 * 60_000;
         }
       }
       // In-play author: checks every minute, but only CALLS the model when a

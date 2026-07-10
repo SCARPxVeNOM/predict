@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api.js';
+import { api, API_BASE } from '../lib/api.js';
 import { flagSrc } from '../lib/flags.js';
 import MarketCard from '../components/MarketCard.js';
 
@@ -21,7 +21,7 @@ export default function Predictions() {
   const { data: scorers = [] } = useQuery<ScorerRow[]>({
     queryKey: ['scorers'],
     queryFn: async () => {
-      const res = await fetch('/api/tournament/scorers');
+      const res = await fetch(`${API_BASE}/api/tournament/scorers`);
       return (await res.json()) as ScorerRow[];
     },
     refetchInterval: 60_000,

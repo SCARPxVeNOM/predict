@@ -9,6 +9,88 @@ import type { Ctx } from './txline.js';
 import type { Program } from '@coral-xyz/anchor';
 import type { GroundtruthPool } from '@groundtruth/chain';
 
+/** How far back the chain-recovery sweep looks for started fixtures. */
+const RECOVERY_WINDOW_MS = 3 * 86_400_000;
+
+/**
+ * Rebuild catalog market rows for a started fixture from the chain — the
+ * on-chain pool account is the source of truth, the DB is just a cache of it.
+ * Single-proof markets are recovered only if their PDA actually exists;
+ * composite (DB-only) markets are recreated so the settler can prove their
+ * legs and settle them.
+ */
+async function recoverFixtureMarkets(
+  pool: Program<GroundtruthPool>,
+  f: { FixtureId: number; StartTime: number; Participant1: string; Participant2: string },
+  now: number,
+) {
+  const fxInfo = { fixtureId: f.FixtureId, home: f.Participant1, away: f.Participant2 };
+  const defs = [...classAMarkets(fxInfo), ...classAMarkets(fxInfo, 1)];
+  for (const def of defs) {
+    const id = `${f.FixtureId}:${def.slug}`;
+    const existing = await db.query.markets.findFirst({ where: eq(schema.markets.id, id) });
+    if (existing) continue;
+
+    const hashHex = termsHashHex(fromPlainTerms(def.terms));
+    let marketPdaStr: string | null = null;
+    let vaultPdaStr: string | null = null;
+    let state: 'InPlay' | 'AwaitingRoot' | 'Settled' | 'Void' = 'AwaitingRoot';
+    let winnerYes: boolean | null = null;
+    let evidenceTs: number | null = null;
+    let disputeUntilTs: number | null = null;
+
+    if (!def.andTerms?.length) {
+      const pda = marketPda(fromPlainTerms(def.terms));
+      let acct: Awaited<ReturnType<typeof pool.account.market.fetchNullable>>;
+      try {
+        acct = await pool.account.market.fetchNullable(pda);
+      } catch (err) {
+        console.error(`[auto-market] recovery fetch failed for ${id}: ${String(err).slice(0, 120)}`);
+        continue; // transient RPC failure — retry next tick
+      }
+      if (!acct) continue; // never existed on-chain; nothing to recover
+      marketPdaStr = pda.toBase58();
+      vaultPdaStr = vaultPda(pda).toBase58();
+      const st = acct.state as Record<string, unknown>;
+      if ('resolved' in st) {
+        state = 'Settled';
+        winnerYes = acct.winnerYes;
+        evidenceTs = Number(acct.evidenceTs) * 1000;
+        disputeUntilTs = Number(acct.disputeUntilTs) * 1000;
+      } else if ('void' in st) {
+        state = 'Void';
+      } // else Open: fixture already started → settler drives it from AwaitingRoot
+      await new Promise((r) => setTimeout(r, 500)); // RPC budget
+    }
+
+    await db.insert(schema.markets).values({
+      id,
+      fixtureId: f.FixtureId,
+      slug: def.slug,
+      marketClass: def.marketClass,
+      question: def.question,
+      yesLabel: def.yesLabel,
+      noLabel: def.noLabel,
+      termsJson: JSON.stringify(def.terms),
+      termsHash: hashHex,
+      andTermsJson: def.andTerms ? JSON.stringify(def.andTerms) : null,
+      lockRule: def.lockRule,
+      resolutionMethod: def.resolutionMethod,
+      state,
+      winnerYes,
+      evidenceTs,
+      disputeUntilTs,
+      lockTs: f.StartTime - 2 * 60_000,
+      resolveDeadlineTs: f.StartTime + config.resolveDeadlineMs,
+      marketPda: marketPdaStr,
+      vaultPda: vaultPdaStr,
+      createdAt: now,
+      updatedAt: now,
+    });
+    console.log(`[auto-market] recovered ${id} from chain (${state})`);
+  }
+}
+
 /**
  * Auto-market engine (spec §10.1). Polls the fixtures snapshot, upserts
  * fixtures, and instantiates the Class-A catalog for every upcoming covered
@@ -44,8 +126,17 @@ export function startAutoMarketEngine(ctx: Ctx, pool: Program<GroundtruthPool>) 
         });
 
       // Only create markets for fixtures that have not kicked off yet and
-      // start within the horizon (rent + RPC budget).
-      if (f.StartTime <= now || f.StartTime > now + config.marketHorizonMs) continue;
+      // start within the horizon (rent + RPC budget). Fixtures that already
+      // started get a recovery sweep instead: if the DB was lost (fresh
+      // deploy, wiped volume), catalog market rows are reconstructed from
+      // their on-chain pool accounts so settlement and claims keep working.
+      if (f.StartTime <= now) {
+        if (f.StartTime > now - RECOVERY_WINDOW_MS) {
+          await recoverFixtureMarkets(pool, f, now);
+        }
+        continue;
+      }
+      if (f.StartTime > now + config.marketHorizonMs) continue;
 
       // NOTE: catalog templates speak home/away in P1/P2 stat terms; when the
       // feed has P1 = away team, home/away labels must swap.

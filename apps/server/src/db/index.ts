@@ -4,7 +4,8 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 
-const dataDir = path.resolve(import.meta.dirname, '../../data');
+// DATA_DIR lets deployed environments point at a mounted volume.
+const dataDir = process.env.DATA_DIR ?? path.resolve(import.meta.dirname, '../../data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 const sqlite = new Database(path.join(dataDir, 'groundtruth.db'));

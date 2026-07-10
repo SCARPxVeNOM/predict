@@ -18,3 +18,5 @@ program/target/
 program/.anchor/
 *.tsbuildinfo
 apps/server/data/
+
+.vercel

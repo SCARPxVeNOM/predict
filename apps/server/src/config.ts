@@ -39,8 +39,9 @@ export const config = {
 };
 
 export function loadKeeper(): Keypair {
-  const secret = Uint8Array.from(JSON.parse(fs.readFileSync(config.keeperKeypairPath, 'utf8')));
-  return Keypair.fromSecretKey(secret);
+  // Deployed environments (no .wallets dir) pass the keypair via env.
+  const raw = process.env.KEEPER_SECRET ?? fs.readFileSync(config.keeperKeypairPath, 'utf8');
+  return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
 }
 
 export interface AuthFile {
@@ -50,11 +51,20 @@ export interface AuthFile {
 }
 
 export function loadAuthFile(): AuthFile {
-  if (!fs.existsSync(config.authPath)) return {};
-  return JSON.parse(fs.readFileSync(config.authPath, 'utf8')) as AuthFile;
+  if (fs.existsSync(config.authPath)) {
+    return JSON.parse(fs.readFileSync(config.authPath, 'utf8')) as AuthFile;
+  }
+  // Deployed environments seed the TxLINE session via env; refreshes are
+  // persisted back to the (ephemeral) file path afterwards.
+  if (process.env.TXLINE_AUTH_JSON) return JSON.parse(process.env.TXLINE_AUTH_JSON) as AuthFile;
+  return {};
 }
 
 export function saveAuthFile(auth: AuthFile): void {
-  fs.mkdirSync(walletsDir, { recursive: true });
-  fs.writeFileSync(config.authPath, JSON.stringify(auth, null, 2));
+  try {
+    fs.mkdirSync(walletsDir, { recursive: true });
+    fs.writeFileSync(config.authPath, JSON.stringify(auth, null, 2));
+  } catch (err) {
+    console.error('[config] could not persist auth file:', String(err).slice(0, 120));
+  }
 }
