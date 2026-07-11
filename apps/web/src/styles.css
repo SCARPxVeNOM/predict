@@ -168,6 +168,35 @@ input { font-family: inherit; }
 .class-chip.A { background: #e7f6ee; color: var(--green); }
 .class-chip.B { background: #fef3e2; color: var(--amber); }
 .class-chip.C { background: #e8effd; color: #3457d5; }
+
+/* Full-screen faucet success celebration */
+.faucet-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(10, 14, 25, 0.55); backdrop-filter: blur(3px);
+}
+.faucet-overlay .tick {
+  width: 116px; height: 116px; border-radius: 50%;
+  background: #22c55e; color: #fff; font-size: 66px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 14px 44px rgba(34, 197, 94, 0.45);
+  animation: faucet-pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.faucet-overlay .msg { margin-top: 18px; color: #fff; font-size: 21px; font-weight: 700; }
+@keyframes faucet-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Wallet-adapter dropdown: bigger and readable on the dark hero */
+.wallet-adapter-dropdown-list {
+  background: #141a2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  min-width: 230px; padding: 8px; z-index: 300;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);
+}
+.wallet-adapter-dropdown-list-item {
+  color: #fff !important; font-size: 14.5px !important; font-weight: 600 !important;
+  padding: 13px 16px !important; border-radius: 10px;
+}
+.wallet-adapter-dropdown-list-item:hover { background: rgba(255, 255, 255, 0.12) !important; }
 .mcard-q { font-size: 15px; font-weight: 600; line-height: 1.35; min-height: 40px; }
 .mcard-q small { display: block; color: var(--muted); font-weight: 500; font-size: 12px; margin-top: 2px; }
 .spark { width: 100%; height: 44px; }

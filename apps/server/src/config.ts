@@ -31,6 +31,12 @@ export const config = {
   createThrottleMs: 4_000,
   /** Gemini free-tier key for the AI market author (empty = deterministic only). */
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
+  /** All available keys (GEMINI_API_KEY + GEMINI_API_KEY_2..9) — the client
+   * rotates across them because free-tier quotas are per key AND per model. */
+  geminiApiKeys: [
+    process.env.GEMINI_API_KEY,
+    ...Array.from({ length: 8 }, (_, i) => process.env[`GEMINI_API_KEY_${i + 2}`]),
+  ].filter((k): k is string => !!k),
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
   /** Separate free-tier quota bucket used when the primary model 429s. */
   geminiModelFallback: process.env.GEMINI_MODEL_FALLBACK ?? 'gemini-2.5-flash-lite',

@@ -9,6 +9,7 @@ export default function FaucetButton() {
   const wallet = useAnchorWallet();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [celebrate, setCelebrate] = useState(false);
 
   async function run() {
     if (!wallet) return;
@@ -33,6 +34,8 @@ export default function FaucetButton() {
       const provider = oracle.provider as AnchorProvider;
       const sig = await provider.sendAndConfirm(tx);
       setMsg(`+100 USDT ✓ ${sig.slice(0, 8)}…`);
+      setCelebrate(true);
+      setTimeout(() => setCelebrate(false), 2600);
     } catch (err) {
       const s = String(err);
       setMsg(/RateLimit/.test(s) ? 'Faucet rate-limited — try later' : s.slice(0, 90));
@@ -47,7 +50,15 @@ export default function FaucetButton() {
       <button className="ghost" disabled={busy} onClick={run} title="Get 100 devnet USDT">
         {busy ? 'Fauceting…' : '💧 Faucet'}
       </button>
-      {msg && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{msg}</span>}
+      {msg && (
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff' }}>{msg}</span>
+      )}
+      {celebrate && (
+        <div className="faucet-overlay" onClick={() => setCelebrate(false)}>
+          <div className="tick">✓</div>
+          <div className="msg">Faucet received — 100 USDT</div>
+        </div>
+      )}
     </>
   );
 }
