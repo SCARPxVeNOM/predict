@@ -1,14 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, API_BASE } from '../lib/api.js';
-import { flagSrc } from '../lib/flags.js';
+import { api } from '../lib/api.js';
 import MarketCard from '../components/MarketCard.js';
-
-interface ScorerRow {
-  playerId: number;
-  name: string | null;
-  team: string | null;
-  goals: number;
-}
 
 /**
  * Tournament-level markets. ONLY markets the data can truthfully settle live
@@ -23,14 +15,6 @@ interface ScorerRow {
 export default function Predictions() {
   const { data: markets = [] } = useQuery({ queryKey: ['markets'], queryFn: () => api.markets() });
   const { data: fixtures = [] } = useQuery({ queryKey: ['fixtures'], queryFn: () => api.fixtures() });
-  const { data: scorers = [] } = useQuery<ScorerRow[]>({
-    queryKey: ['scorers'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/tournament/scorers`);
-      return (await res.json()) as ScorerRow[];
-    },
-    refetchInterval: 60_000,
-  });
 
   const tournament = markets.filter((m) => m.id.startsWith('wc:'));
   // Live contenders first; eliminated (settled) teams sink to the end, dimmed.
@@ -55,6 +39,21 @@ export default function Predictions() {
       )
       .map((m) => ({ m, f })),
   );
+
+  // AI-authored specials for upcoming/live fixtures: extra provable markets
+  // beyond the fixed catalog, grounded in the knockout form data we hold.
+  const fixtureById = new Map(fixtures.map((f) => [f.fixtureId, f]));
+  const aiSpecials = markets
+    .filter((m) => {
+      if (m.origin !== 'ai' || m.fixtureId <= 0) return false;
+      const f = fixtureById.get(m.fixtureId);
+      return f !== undefined && f.startTime > Date.now() - 12 * 3600_000;
+    })
+    .sort((a, b) => {
+      const fa = fixtureById.get(a.fixtureId)!.startTime;
+      const fb = fixtureById.get(b.fixtureId)!.startTime;
+      return fa - fb;
+    });
 
   return (
     <>
@@ -107,42 +106,29 @@ export default function Predictions() {
         )}
       </div>
 
-      {scorers.length > 0 && (
+      {aiSpecials.length > 0 && (
         <div className="panel">
           <div className="panel-head">
-            <h2>Knockout-round scorers</h2>
+            <h2>AI Specials</h2>
           </div>
           <div className="panel-sub">
-            Goals from matches inside our licensed coverage window (quarterfinals onward). This is
-            NOT the official Golden Boot tally — the feed does not retain group-stage player
-            stats, which is also why no Golden Boot market exists here: nothing we hold could
-            settle it truthfully.
+            Extra markets authored by the AI from the TxLINE data it holds — knockout form
+            pre-match, the live stat feed in-play. Every one is a real on-chain pool inside the
+            provable stat grammar: locks at kickoff (or a short in-play window), settles by
+            Merkle proof, voids and refunds automatically if it ever can't.
           </div>
-          <table className="lb">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Player</th>
-                <th>Team</th>
-                <th>Goals (knockouts)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scorers.slice(0, 10).map((s, i) => (
-                <tr key={s.playerId}>
-                  <td>{i + 1}</td>
-                  <td style={{ fontWeight: 600 }}>{s.name ?? `Player #${s.playerId}`}</td>
-                  <td>
-                    {s.team && flagSrc(s.team) && (
-                      <img className="flag" src={flagSrc(s.team)!} alt="" style={{ marginRight: 6 }} />
-                    )}
-                    {s.team}
-                  </td>
-                  <td style={{ fontWeight: 700 }}>{s.goals}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="cards">
+            {aiSpecials.map((m) => (
+              <div key={m.id}>
+                <MarketCard m={m} fixture={fixtureById.get(m.fixtureId)} />
+                {m.rationale && (
+                  <div className="mini-note" style={{ marginTop: 6 }}>
+                    🤖 {m.rationale}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </>

@@ -370,14 +370,16 @@ STRICT RULES:
    * real two-sided market. Kills "over 0.5 yellow cards"-style free money. */
   const FAMILY_BAND: Record<string, number> = { goals: 1.25, yellows: 1.5, reds: 0.75, corners: 3.5 };
 
-  /** Returns a rejection reason, or null when the line is fair and undecided. */
+  /** Returns a rejection reason, or null when the line is fair and undecided.
+   * Also used pre-match (statusId NS, empty stats, clock 0) — there every
+   * period is still open and expectations run from the base rates. */
   function inPlayGuard(
     p: { period: 0 | 1 | 2; statAKey: number; statBKey: number | null; comparison: string; threshold: number; op: string | null },
     stats: Record<string, number>,
     statusId: number,
     clockSeconds: number,
   ): string | null {
-    if (p.period === 1) return 'first half already known in-play';
+    if (p.period === 1 && statusId !== SOCCER_STATUS.NS) return 'first half already known in-play';
     const fam = STAT_FAMILY[p.statAKey]!;
     const curA = stats[String(p.period * 1000 + p.statAKey)] ?? 0;
     const curB = p.statBKey === null ? 0 : stats[String(p.period * 1000 + p.statBKey)] ?? 0;
@@ -391,9 +393,11 @@ STRICT RULES:
     }
 
     const remaining =
-      p.period === 2 && statusId <= SOCCER_STATUS.HT
+      p.period === 1
         ? 2700
-        : Math.max(0, 5400 - clockSeconds);
+        : p.period === 2 && statusId <= SOCCER_STATUS.HT
+          ? 2700
+          : Math.max(0, 5400 - clockSeconds);
     const rate = p.op === 'Add' ? FAMILY_RATE[fam]! : p.op === 'Subtract' ? 0 : FAMILY_RATE[fam]! / 2;
     const expectedFinal = cur + rate * (remaining / 5400);
     const line =
@@ -592,6 +596,203 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         existingHashes.add(hashHex);
         perFixtureAiCount.set(p.fixtureId, (perFixtureAiCount.get(p.fixtureId) ?? 0) + 1);
         console.log(`[ai-markets] in-play market authored ${p.fixtureId}:ai-${p.slug} — ${p.question}`);
+      }
+    }
+  }
+
+  /**
+   * Pre-match AI specials (user request 2026-07-11): for every upcoming
+   * covered fixture the AI authors a few markets BEYOND the fixed catalog —
+   * cards lines, corner matchups, half-scoped totals — grounded in the
+   * knockout-form stats we actually hold, strictly inside the provable
+   * grammar. Lifecycle is fully automated and identical to catalog markets:
+   * real on-chain pool, lock 2min before kickoff, Merkle-proof settlement,
+   * void+refund after the deadline, auto-archive off the Live page.
+   */
+  const prematchFired = new Set<number>();
+
+  async function prematchAiTick() {
+    const now = Date.now();
+    const fixtures = await db.query.fixtures.findMany();
+    const upcoming = fixtures.filter(
+      (f) =>
+        f.competitionId === 72 &&
+        (f.statusId === null || f.statusId === SOCCER_STATUS.NS) &&
+        f.startTime > now + 30 * 60_000 &&
+        f.startTime < now + 48 * 3600_000,
+    );
+    if (!upcoming.length) return;
+
+    const allMarkets = await db.query.markets.findMany();
+    const existingHashes = new Set(allMarkets.map((m) => m.termsHash));
+
+    // Per-team knockout form from finished covered fixtures — real grounding
+    // for the lines the model proposes.
+    const done = fixtures.filter((f) => f.competitionId === 72 && fixtureDone(f) && f.statsJson);
+    const form = new Map<
+      number,
+      { team: string; matches: number; goalsFor: number; goalsAgainst: number; yellows: number; corners: number }
+    >();
+    for (const f of done) {
+      const stats = JSON.parse(f.statsJson!) as Record<string, number>;
+      const p1Id = f.homeIsP1 ? f.homeId : f.awayId;
+      const p2Id = f.homeIsP1 ? f.awayId : f.homeId;
+      const p1Name = f.homeIsP1 ? f.home : f.away;
+      const p2Name = f.homeIsP1 ? f.away : f.home;
+      const upd = (id: number, team: string, gf: number, ga: number, y: number, c: number) => {
+        const t = form.get(id) ?? { team, matches: 0, goalsFor: 0, goalsAgainst: 0, yellows: 0, corners: 0 };
+        t.matches += 1;
+        t.goalsFor += gf;
+        t.goalsAgainst += ga;
+        t.yellows += y;
+        t.corners += c;
+        form.set(id, t);
+      };
+      upd(p1Id, p1Name, stats['1'] ?? 0, stats['2'] ?? 0, stats['3'] ?? 0, stats['7'] ?? 0);
+      upd(p2Id, p2Name, stats['2'] ?? 0, stats['1'] ?? 0, stats['4'] ?? 0, stats['8'] ?? 0);
+    }
+
+    for (const f of upcoming) {
+      if (prematchFired.has(f.fixtureId)) continue;
+      const aiPrematch = allMarkets.filter(
+        (m) => m.fixtureId === f.fixtureId && m.origin === 'ai' && m.lockRule === 'kickoff',
+      );
+      if (aiPrematch.length >= 1) {
+        prematchFired.add(f.fixtureId); // authored on a previous run
+        continue;
+      }
+      prematchFired.add(f.fixtureId); // at most one model call per fixture per process
+
+      const teamP1 = f.homeIsP1 ? f.home : f.away;
+      const teamP2 = f.homeIsP1 ? f.away : f.home;
+      const p1Id = f.homeIsP1 ? f.homeId : f.awayId;
+      const p2Id = f.homeIsP1 ? f.awayId : f.homeId;
+      const ctxJson = {
+        fixtureId: f.fixtureId,
+        teamP1,
+        teamP2,
+        kickoff: new Date(f.startTime).toISOString(),
+        knockoutForm: { teamP1: form.get(p1Id) ?? null, teamP2: form.get(p2Id) ?? null },
+        existingQuestions: allMarkets
+          .filter((m) => m.fixtureId === f.fixtureId)
+          .map((m) => m.question),
+      };
+      const prompt = `You author PRE-MATCH prediction markets for an upcoming FIFA World Cup 2026 knockout match. You are a PARSER of the real data below — ground every line in the teams' knockout form.
+STRICT GRAMMAR (anything else is rejected):
+- statAKey/statBKey are base keys: 1=teamP1 goals, 2=teamP2 goals, 3=teamP1 yellow cards, 4=teamP2 yellows, 5=teamP1 reds, 6=teamP2 reds, 7=teamP1 corners, 8=teamP2 corners.
+- period: 0=full game, 1=first half, 2=second half (all open pre-match).
+- predicate: value(statA [op statB]) comparison threshold. op is "Add"|"Subtract"|null. comparison "GreaterThan"|"LessThan"|"EqualTo". Integer threshold. Over X.5 = GreaterThan floor(X.5).
+- When op is set, both keys MUST be the same stat family.
+BALANCE RULE: pick lines a bookmaker would set — near the expected value given the form data, genuinely uncertain both ways. One-sided lines are rejected.
+Output ONLY JSON: {"markets":[{"slug","question","yesLabel","noLabel","fixtureId","period","statAKey","statBKey","comparison","threshold","op","rationale"}]}
+MATCH DATA: ${JSON.stringify(ctxJson)}
+fixtureId MUST be ${f.fixtureId}. Use exact team names in questions; cite the form numbers in rationale. Do NOT duplicate existingQuestions (the standard O/U goals, win, corners 8.5/10.5, yellows 3.5 markets already exist). Max 3 markets.`;
+
+      const text = await geminiGenerate(prompt);
+      if (!text) continue;
+      let proposals: z.infer<typeof liveProposalSchema>['markets'];
+      try {
+        let raw: unknown = JSON.parse(text);
+        if (Array.isArray(raw)) raw = { markets: raw };
+        const parsed = liveProposalSchema.safeParse(raw);
+        if (!parsed.success) {
+          const issues = parsed.error.issues
+            .slice(0, 5)
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join(' | ');
+          console.error(`[ai-markets] prematch proposals rejected: ${issues}\n  raw: ${text.slice(0, 400)}`);
+          continue;
+        }
+        proposals = parsed.data.markets;
+      } catch {
+        console.error(`[ai-markets] prematch proposals: non-JSON output discarded: ${text.slice(0, 300)}`);
+        continue;
+      }
+
+      let created = 0;
+      for (const p of proposals) {
+        if (p.fixtureId !== f.fixtureId) continue;
+        if (p.slug.length < 3) continue;
+        if (created >= 3) break;
+        const famA = STAT_FAMILY[p.statAKey]!;
+        if (p.op !== null) {
+          if (p.statBKey === null) continue;
+          if (STAT_FAMILY[p.statBKey] !== famA) continue;
+          if (p.statAKey === p.statBKey) continue;
+        } else if (p.statBKey !== null) {
+          continue;
+        }
+        if (p.threshold > FAMILY_MAX_THRESHOLD[famA]!) continue;
+        const q = p.question.toLowerCase();
+        const familyWord = { goals: 'goal', yellows: 'card', reds: 'card', corners: 'corner' }[famA];
+        if (!q.includes(teamP1.toLowerCase()) && !q.includes(teamP2.toLowerCase()) && !q.includes(familyWord)) continue;
+        if (/\btotal\b|\bcombined\b|\bboth teams\b/.test(q) && p.op !== 'Add') continue;
+        const rejection = inPlayGuard(p, {}, SOCCER_STATUS.NS, 0);
+        if (rejection) {
+          console.log(`[ai-markets] prematch guard rejected ${p.slug}: ${rejection}`);
+          continue;
+        }
+
+        const terms: PlainTerms = {
+          fixtureId: p.fixtureId,
+          period: 0, // proof leaf convention: half lives in the offset key
+          statAKey: p.period * 1000 + p.statAKey,
+          statBKey: p.statBKey === null ? null : p.period * 1000 + p.statBKey,
+          predicate: { threshold: p.threshold, comparison: p.comparison },
+          op: p.op,
+          negation: false,
+        };
+        const hashHex = termsHashHex(fromPlainTerms(terms));
+        if (existingHashes.has(hashHex)) continue;
+
+        const lockTs = f.startTime - 2 * 60_000;
+        let marketPda: string | null = null;
+        let vaultPda: string | null = null;
+        let createTx: string | null = null;
+        try {
+          const res = await createMarket(pool, ctx.keeper, terms, {
+            lockTs: Math.floor(lockTs / 1000),
+            resolveDeadlineTs: Math.floor((f.startTime + config.resolveDeadlineMs) / 1000),
+          });
+          marketPda = res.market.toBase58();
+          vaultPda = res.vault.toBase58();
+          createTx = res.signature;
+          await new Promise((r) => setTimeout(r, config.createThrottleMs));
+        } catch (err) {
+          console.error(`[ai-markets] prematch pool create failed (${p.slug}): ${String(err).slice(0, 150)}`);
+          continue;
+        }
+
+        await db
+          .insert(schema.markets)
+          .values({
+            id: `${p.fixtureId}:ai-${p.slug}`,
+            fixtureId: p.fixtureId,
+            slug: `ai-${p.slug}`,
+            marketClass: 'A',
+            question: p.question,
+            yesLabel: p.yesLabel,
+            noLabel: p.noLabel,
+            termsJson: JSON.stringify(terms),
+            termsHash: hashHex,
+            lockRule: 'kickoff',
+            resolutionMethod:
+              'Settled on-chain: Merkle proof of the match stat verified against the TxLINE daily scores root (AI special, grounded in knockout form)',
+            state: 'Open',
+            lockTs,
+            resolveDeadlineTs: f.startTime + config.resolveDeadlineMs,
+            marketPda,
+            vaultPda,
+            createTx,
+            origin: 'ai',
+            rationale: p.rationale,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoNothing();
+        existingHashes.add(hashHex);
+        created += 1;
+        console.log(`[ai-markets] prematch special authored ${p.fixtureId}:ai-${p.slug} — ${p.question}`);
       }
     }
   }
@@ -799,6 +1000,13 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         await liveAiTick();
       } catch (err) {
         console.error('[ai-markets] live tick failed', String(err).slice(0, 300));
+      }
+      // Pre-match specials: cheap DB check per minute; at most one model call
+      // per upcoming fixture.
+      try {
+        await prematchAiTick();
+      } catch (err) {
+        console.error('[ai-markets] prematch tick failed', String(err).slice(0, 300));
       }
       await new Promise((r) => setTimeout(r, config.liveAiPollMs));
     }

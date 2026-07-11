@@ -40,6 +40,10 @@ export interface MarketRow {
   participantCount: number;
   winnerYes: boolean | null;
   disputeUntilTs: number | null;
+  /** 'auto' = catalog engine, 'ai' = AI-authored (in-play or pre-match special). */
+  origin: string;
+  /** AI's one-line reasoning, shown as provenance on AI-authored cards. */
+  rationale: string | null;
 }
 
 export interface PositionRow {
