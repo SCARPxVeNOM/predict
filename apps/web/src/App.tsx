@@ -28,12 +28,8 @@ export default function App() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-ball">⚽</div>
-          <div className="brand-name">
-            World Cup
-            <br />
-            Markets
-          </div>
+          <div className="brand-ball">🏆</div>
+          <div className="brand-name">Winners'Club</div>
         </div>
         {NAV.map((n) => (
           <button
@@ -96,13 +92,7 @@ export default function App() {
           </>
         )}
 
-        <div className="footer">
-          © 2026 World Cup Markets · Solana devnet · settlement proofs by TxLINE — no mock data,
-          every number on this page is on-chain or from the licensed feed.
-          <br />
-          Stadium photo by YoTuT (CC BY 2.0, Wikimedia Commons) · flags from flagcdn.com (public
-          domain)
-        </div>
+        <div className="footer">© 2026 Winners'Club 🏆 · Solana devnet · settlement proofs by TxLINE</div>
       </main>
     </div>
   );

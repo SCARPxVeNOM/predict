@@ -51,7 +51,10 @@ body {
 
 /* ---- hero band -------------------------------------------------------- */
 .hero {
-  position: relative; border-radius: 18px; overflow: hidden; margin-bottom: 22px;
+  /* overflow must stay visible: the wallet dropdown renders inside the hero
+     and was clipped by the rounded band (border-radius clips the background
+     image on its own, so nothing is lost). */
+  position: relative; border-radius: 18px; overflow: visible; z-index: 20; margin-bottom: 22px;
   border: 1px solid var(--border); box-shadow: var(--shadow);
   background:
     linear-gradient(100deg, rgba(10, 18, 42, 0.86) 18%, rgba(15, 30, 70, 0.62) 55%, rgba(20, 40, 90, 0.35)),
@@ -189,7 +192,7 @@ input { font-family: inherit; }
 .wallet-adapter-dropdown-list {
   background: #141a2b !important;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  min-width: 230px; padding: 8px; z-index: 300;
+  min-width: 280px; padding: 10px; z-index: 500 !important;
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);
 }
 .wallet-adapter-dropdown-list-item {

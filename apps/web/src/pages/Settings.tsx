@@ -12,6 +12,8 @@ export default function Settings() {
     ['Stake token', `devnet USDT ${DEVNET.usdtMint}`],
     ['Data feed', 'TxLINE free tier — World Cup + friendlies, ~60 s delayed'],
     ['Wallet', publicKey ? publicKey.toBase58() : 'not connected'],
+    // CC BY 2.0 requires attribution somewhere on the site — it lives here.
+    ['Image credits', 'Stadium photo by YoTuT (CC BY 2.0, Wikimedia Commons) · flags from flagcdn.com (public domain)'],
   ];
   return (
     <div className="panel">
