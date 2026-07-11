@@ -32,6 +32,8 @@ export const config = {
   /** Gemini free-tier key for the AI market author (empty = deterministic only). */
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+  /** Separate free-tier quota bucket used when the primary model 429s. */
+  geminiModelFallback: process.env.GEMINI_MODEL_FALLBACK ?? 'gemini-2.5-flash-lite',
   /** How often the tournament/AI market author runs. */
   aiTickMs: 6 * 3600_000,
   /** How often we check for live matches needing in-play AI markets. */
