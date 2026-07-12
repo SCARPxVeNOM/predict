@@ -7,4 +7,6 @@ startCommand = "pnpm --filter @groundtruth/server start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 5
+# High retry ceiling so a transient RPC 429 storm can't permanently down the
+# service (it recovers on restart; the backoff logic prevents re-storming).
+restartPolicyMaxRetries = 50

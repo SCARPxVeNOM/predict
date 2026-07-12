@@ -142,13 +142,21 @@ export function startPositionIndexer(pool: Program<GroundtruthPool>) {
   }
 
   const loop = async () => {
+    let backoff = 0;
     while (!stopped) {
       try {
         await tick();
+        backoff = 0;
       } catch (err) {
-        console.error('[positions] tick failed', String(err).slice(0, 300));
+        const s = String(err);
+        // On rate-limit (429), back off hard so we don't feed a retry storm
+        // that can starve the health server and get the container killed.
+        backoff = /429|Too Many Requests|rate limit/i.test(s)
+          ? Math.min(config.failureBackoffMs, (backoff || config.pollPositionsMs) * 2)
+          : 0;
+        console.error(`[positions] tick failed (backoff ${backoff}ms):`, s.slice(0, 200));
       }
-      await new Promise((r) => setTimeout(r, config.pollPositionsMs));
+      await new Promise((r) => setTimeout(r, config.pollPositionsMs + backoff));
     }
   };
   void loop();

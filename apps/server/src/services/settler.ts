@@ -279,22 +279,33 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     }
   }
 
+  // Markets whose on-chain void is already done (this process) — so we don't
+  // re-send a voidMarketOnChain RPC every tick for dozens of void markets,
+  // which was a major source of the free-tier 429 retry storm.
+  const finalizedVoids = new Set<string>();
+
   async function voidOne(m: typeof schema.markets.$inferSelect) {
-    if (m.marketPda && Date.now() >= m.resolveDeadlineTs) {
+    if (m.marketPda && Date.now() >= m.resolveDeadlineTs && !finalizedVoids.has(m.id)) {
       try {
         await voidMarketOnChain(pool, ctx.keeper, m.marketPda);
+        finalizedVoids.add(m.id);
       } catch (err) {
-        if (!/MarketNotOpen/.test(String(err))) throw err;
+        // Already void on-chain — nothing more to do, stop retrying it.
+        if (/MarketNotOpen|MarketVoid/.test(String(err))) finalizedVoids.add(m.id);
+        else throw err;
       }
     }
-    await db
-      .update(schema.markets)
-      .set({ state: 'Void', updatedAt: Date.now() })
-      .where(eq(schema.markets.id, m.id));
-    bus.emit('market', { id: m.id, state: 'Void' });
+    if (m.state !== 'Void') {
+      await db
+        .update(schema.markets)
+        .set({ state: 'Void', updatedAt: Date.now() })
+        .where(eq(schema.markets.id, m.id));
+      bus.emit('market', { id: m.id, state: 'Void' });
+    }
   }
 
   const loop = async () => {
+    let backoff = 0;
     while (!stopped) {
       try {
         // Time-based lock sweep: records only arrive while something happens
@@ -342,11 +353,13 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
           }
         }
 
-        // Void overdue markets (root never came / abandoned).
+        // Void overdue markets (root never came / abandoned). Skip ones whose
+        // on-chain void is already finalized so we don't re-hit the RPC.
         const overdue = await db.query.markets.findMany({
           where: inArray(schema.markets.state, ['Open', 'Locked', 'InPlay', 'AwaitingRoot', 'Void']),
         });
         for (const m of overdue) {
+          if (finalizedVoids.has(m.id)) continue;
           const pastDeadline = Date.now() >= m.resolveDeadlineTs;
           if (m.state === 'Void' || pastDeadline) {
             try {
@@ -356,10 +369,15 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
             }
           }
         }
+        backoff = 0;
       } catch (err) {
-        console.error('[settler] tick failed', String(err).slice(0, 300));
+        const s = String(err);
+        backoff = /429|Too Many Requests|rate limit/i.test(s)
+          ? Math.min(config.failureBackoffMs, (backoff || config.settlerTickMs) * 2)
+          : 0;
+        console.error(`[settler] tick failed (backoff ${backoff}ms)`, s.slice(0, 300));
       }
-      await new Promise((r) => setTimeout(r, config.settlerTickMs));
+      await new Promise((r) => setTimeout(r, config.settlerTickMs + backoff));
     }
   };
   void loop();

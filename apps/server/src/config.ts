@@ -23,8 +23,12 @@ export const config = {
   keeperKeypairPath: path.join(walletsDir, 'keeper.json'),
   authPath: path.join(walletsDir, 'txline-auth.json'),
   pollFixturesMs: 5 * 60_000,
-  pollPositionsMs: 60_000,
-  settlerTickMs: 45_000,
+  // Position indexer runs a heavy getProgramAccounts scan; keep it gentle so
+  // the free-tier RPC does not rate-limit (429) us into a retry storm.
+  pollPositionsMs: 3 * 60_000,
+  settlerTickMs: 90_000,
+  /** Extra backoff added when a service tick fails (e.g. RPC 429), capped. */
+  failureBackoffMs: 5 * 60_000,
   /** Only auto-create markets for fixtures starting within this window. */
   marketHorizonMs: 14 * 86_400_000,
   /** Pause between on-chain market creations (public RPC rate limits). */
