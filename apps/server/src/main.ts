@@ -44,28 +44,37 @@ if (process.env.REQUEUE_VOID_FIXTURES) {
   console.log(`[main] requeued ${n} voided markets for re-settlement (fixtures ${ids.join(', ')})`);
 }
 
-const ctx = await buildContext();
-console.log(`[main] keeper ${ctx.keeper.publicKey.toBase58()} | TxLINE session active`);
-
-const pool = createPoolProgram(ctx.connection, ctx.keeper);
-console.log(`[main] pool program ${pool.programId.toBase58()}`);
-
-const stops = [
-  startAutoMarketEngine(ctx, pool),
-  startIndexer(ctx),
-  startSettler(ctx, pool),
-  startPositionIndexer(pool),
-  startAiMarketAuthor(ctx, pool),
-];
-console.log(
-  `[main] AI market author: ${config.geminiApiKey ? `Gemini (${config.geminiModel})` : 'deterministic only — set GEMINI_API_KEY in .env to enable'}`,
-);
-
+// Start the HTTP server FIRST so /api/health is reachable within a second of
+// boot — the platform healthcheck must never wait on TxLINE auth or an RPC
+// storm, or an unhealthy verdict stops routing traffic (past outage).
 const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
 registerRoutes(app);
 await app.listen({ port: config.port, host: '0.0.0.0' });
 console.log(`[main] API listening on :${config.port}`);
+
+// Bring up the background workers AFTER the server is serving. Guarded so a
+// worker startup failure (e.g. TxLINE auth hiccup) can never take the API
+// down — it keeps serving the DB-backed endpoints and workers retry.
+let stops: (() => void)[] = [];
+try {
+  const ctx = await buildContext();
+  console.log(`[main] keeper ${ctx.keeper.publicKey.toBase58()} | TxLINE session active`);
+  const pool = createPoolProgram(ctx.connection, ctx.keeper);
+  console.log(`[main] pool program ${pool.programId.toBase58()}`);
+  stops = [
+    startAutoMarketEngine(ctx, pool),
+    startIndexer(ctx),
+    startSettler(ctx, pool),
+    startPositionIndexer(pool),
+    startAiMarketAuthor(ctx, pool),
+  ];
+  console.log(
+    `[main] AI market author: ${config.geminiApiKey ? `Gemini (${config.geminiModel})` : 'deterministic only — set GEMINI_API_KEY in .env to enable'}`,
+  );
+} catch (err) {
+  console.error('[main] worker startup failed (API still serving):', String(err).slice(0, 300));
+}
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
