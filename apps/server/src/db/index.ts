@@ -149,6 +149,7 @@ export function migrate(): void {
   for (const stmt of [
     'ALTER TABLE fixtures ADD COLUMN clock_seconds INTEGER',
     'ALTER TABLE fixtures ADD COLUMN stats_json TEXT',
+    'ALTER TABLE markets ADD COLUMN finalized INTEGER NOT NULL DEFAULT 0',
     "ALTER TABLE markets ADD COLUMN origin TEXT NOT NULL DEFAULT 'auto'",
     'ALTER TABLE markets ADD COLUMN rationale TEXT',
   ]) {

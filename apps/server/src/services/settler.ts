@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, lt } from 'drizzle-orm';
 import type { Program } from '@coral-xyz/anchor';
 import { DEVNET, epochDay, type PlainTerms } from '@groundtruth/shared';
 import { STAT_LABEL } from '@groundtruth/catalog';
@@ -259,9 +259,13 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
         winnerYes,
         evidenceTs: val.ts,
         resolveTx,
+        // On-chain resolve (or the composite proof) is done for pool markets;
+        // never re-touch them. Receipt-only backfill leaves it as-is.
+        ...(resolveTx || m.marketPda ? { finalized: true } : {}),
         updatedAt: now,
       })
       .where(eq(schema.markets.id, m.id));
+    if (resolveTx || m.marketPda) finalizedVoids.add(m.id);
 
     if (!quiet) {
       await db.insert(schema.notifications).values({
@@ -279,19 +283,24 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     }
   }
 
-  // Markets whose on-chain void is already done (this process) — so we don't
-  // re-send a voidMarketOnChain RPC every tick for dozens of void markets,
-  // which was a major source of the free-tier 429 retry storm.
+  // Persisted in the DB (markets.finalized): once an on-chain void/resolve is
+  // done we NEVER touch that market again. Without this, every restart
+  // re-sent voidMarketOnChain for dozens of already-void markets and 429-
+  // stormed the free-tier RPC until the whole server was unreachable.
   const finalizedVoids = new Set<string>();
+  async function markFinalized(id: string) {
+    finalizedVoids.add(id);
+    await db.update(schema.markets).set({ finalized: true }).where(eq(schema.markets.id, id));
+  }
 
   async function voidOne(m: typeof schema.markets.$inferSelect) {
     if (m.marketPda && Date.now() >= m.resolveDeadlineTs && !finalizedVoids.has(m.id)) {
       try {
         await voidMarketOnChain(pool, ctx.keeper, m.marketPda);
-        finalizedVoids.add(m.id);
+        await markFinalized(m.id);
       } catch (err) {
         // Already void on-chain — nothing more to do, stop retrying it.
-        if (/MarketNotOpen|MarketVoid/.test(String(err))) finalizedVoids.add(m.id);
+        if (/MarketNotOpen|MarketVoid/.test(String(err))) await markFinalized(m.id);
         else throw err;
       }
     }
@@ -306,6 +315,26 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
 
   const loop = async () => {
     let backoff = 0;
+    // Seed the finalized set: everything already Settled, and every Void whose
+    // resolve deadline has passed (its on-chain void is done or moot). This is
+    // what stops the restart-triggered 429 storm on the very first tick.
+    try {
+      const now = Date.now();
+      await db
+        .update(schema.markets)
+        .set({ finalized: true })
+        .where(
+          and(
+            inArray(schema.markets.state, ['Settled', 'Void']),
+            lt(schema.markets.resolveDeadlineTs, now),
+          ),
+        );
+      const done = await db.query.markets.findMany({ where: eq(schema.markets.finalized, true) });
+      for (const m of done) finalizedVoids.add(m.id);
+      console.log(`[settler] ${finalizedVoids.size} markets finalized (skipped on-chain re-touch)`);
+    } catch (err) {
+      console.error('[settler] finalized-seed failed', String(err).slice(0, 200));
+    }
     while (!stopped) {
       try {
         // Time-based lock sweep: records only arrive while something happens

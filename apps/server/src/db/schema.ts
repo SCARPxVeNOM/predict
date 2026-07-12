@@ -61,6 +61,9 @@ export const markets = sqliteTable(
     origin: text('origin').notNull().default('auto'),
     /** AI's one-line reasoning (shown as provenance on tournament cards). */
     rationale: text('rationale'),
+    /** On-chain settlement/void is finalized — the settler never touches it
+     * again (prevents re-sending resolve/void RPCs that caused a 429 storm). */
+    finalized: integer('finalized', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
