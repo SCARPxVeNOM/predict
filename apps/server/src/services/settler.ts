@@ -102,6 +102,25 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
           console.log(`[settler] ${m.id} unresolvable (EvidenceTooEarly) — voided`);
           return;
         }
+        if (/TimestampMismatch/.test(s)) {
+          // The on-chain daily root has advanced past the period-0 record
+          // (a post-match archival batch, status=100, retips the root ~5min
+          // after full time), so the correctly-scoped proof no longer
+          // validates and the only accepted record has the wrong period.
+          // Within the settling window this can be transient (root mid-post)
+          // — retry; once the match is well finished it is permanent, so
+          // void for refund. Prompt settlement (findDecidingSeq) normally
+          // resolves before the archival record ever posts.
+          if (Date.now() > fixture.startTime + 2.5 * 3600_000) {
+            await db
+              .update(schema.markets)
+              .set({ state: 'Void', updatedAt: Date.now() })
+              .where(eq(schema.markets.id, m.id));
+            bus.emit('market', { id: m.id, state: 'Void' });
+            console.log(`[settler] ${m.id} unprovable (root advanced past period-0 record) — voided`);
+          }
+          return;
+        }
         throw err;
       }
     } else {
