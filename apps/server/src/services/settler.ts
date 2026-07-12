@@ -44,13 +44,19 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     const key = `${fixtureId}:${period}`;
     const hit = decidingSeqCache.get(key);
     if (hit && Date.now() - hit.at < 120_000) return hit.seq;
-    const candidates = withStats
-      .filter((s) => s.StatusId === undefined || (s.StatusId >= 1 && s.StatusId <= 19))
-      .sort((a, b) => b.Seq - a.Seq)
-      .slice(0, 8);
+    // Newest-first, INCLUDING the undocumented archival record: after extra
+    // time / penalties it is the only record whose proof still validates
+    // against the retipped daily root. A record decides only if its proof
+    // period is the market's own (0, the normalized full-totals record) or a
+    // final-archival marker (>= FINAL_PERIOD_FLOOR); mid-match phase records
+    // (1..19) never match, so this can't settle before full time. Must stay
+    // in lockstep with the pool program's period_ok check.
+    const FINAL_PERIOD_FLOOR = 20;
+    const candidates = withStats.sort((a, b) => b.Seq - a.Seq).slice(0, 8);
     for (const c of candidates) {
       const probe = await ctx.txline.statValidation(fixtureId, c.Seq, period * 1000 + 1);
-      if (probe.statToProve.period === period) {
+      const p = probe.statToProve.period;
+      if (p === period || p >= FINAL_PERIOD_FLOOR) {
         decidingSeqCache.set(key, { seq: c.Seq, at: Date.now() });
         return c.Seq;
       }

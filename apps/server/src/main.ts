@@ -1,8 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { and, eq, inArray } from 'drizzle-orm';
 import { createPoolProgram } from '@groundtruth/chain';
 import { config } from './config.js';
-import { db, migrate } from './db/index.js';
+import { db, migrate, schema } from './db/index.js';
 import { registerRoutes } from './api/routes.js';
 import { buildContext } from './services/txline.js';
 import { startAutoMarketEngine } from './services/autoMarket.js';
@@ -18,6 +19,30 @@ process.on('unhandledRejection', (err) => {
 });
 
 migrate();
+
+// One-shot: after the pool-program upgrade that accepts the final-archival
+// proof period, requeue the listed fixtures' DB-voided markets (still Open
+// on-chain, deadline not passed) so the settler re-attempts real proof
+// settlement instead of leaving them to refund. Set the env var for one
+// deploy, then remove it. Genuinely-unresolvable markets (EvidenceTooEarly)
+// simply re-void, so this is safe to run broadly.
+if (process.env.REQUEUE_VOID_FIXTURES) {
+  const ids = process.env.REQUEUE_VOID_FIXTURES.split(',').map((s) => Number(s.trim())).filter(Boolean);
+  const rows = await db.query.markets.findMany({
+    where: and(inArray(schema.markets.fixtureId, ids), eq(schema.markets.state, 'Void')),
+  });
+  let n = 0;
+  const now = Date.now();
+  for (const m of rows) {
+    if (!m.marketPda || now >= m.resolveDeadlineTs) continue;
+    await db
+      .update(schema.markets)
+      .set({ state: 'AwaitingRoot', winnerYes: null, updatedAt: now })
+      .where(eq(schema.markets.id, m.id));
+    n += 1;
+  }
+  console.log(`[main] requeued ${n} voided markets for re-settlement (fixtures ${ids.join(', ')})`);
+}
 
 const ctx = await buildContext();
 console.log(`[main] keeper ${ctx.keeper.publicKey.toBase58()} | TxLINE session active`);

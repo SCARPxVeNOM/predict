@@ -31,6 +31,17 @@ const VALIDATE_STAT_DISC: [u8; 8] = [107, 197, 232, 90, 191, 136, 105, 185];
 /// How long a first resolution can be superseded by later evidence.
 pub const DISPUTE_WINDOW_SECS: i64 = 30 * 60;
 
+/// A market settles only against a FINAL record. TxLINE tags each proof leaf
+/// with the record's phase: mid-match records carry the phase id (1..19,
+/// e.g. H1=2, ET2=9), the end-of-match normalized-totals record carries the
+/// market's own period (0), and a post-match archival record (posted ~5 min
+/// after full time, and after extra time / penalties the ONLY record whose
+/// proof still validates against the retipped daily root) carries a period at
+/// or above this floor (observed 100). Accepting >= this floor lets an
+/// extra-time / penalty match settle by proof, while still rejecting every
+/// mid-match record so a market can never settle before full time.
+const FINAL_PERIOD_FLOOR: i32 = 20;
+
 #[program]
 pub mod groundtruth_pool {
     use super::*;
@@ -135,14 +146,14 @@ pub mod groundtruth_pool {
             fixture_summary.fixture_id == terms.fixture_id,
             PoolError::FixtureMismatch
         );
+        let period_ok = |p: i32| p == terms.period as i32 || p >= FINAL_PERIOD_FLOOR;
         require!(
-            stat_a.stat_to_prove.key == terms.stat_a_key
-                && stat_a.stat_to_prove.period == terms.period as i32,
+            stat_a.stat_to_prove.key == terms.stat_a_key && period_ok(stat_a.stat_to_prove.period),
             PoolError::StatMismatch
         );
         match (&stat_b, terms.stat_b_key) {
             (Some(b), Some(key)) => require!(
-                b.stat_to_prove.key == key && b.stat_to_prove.period == terms.period as i32,
+                b.stat_to_prove.key == key && period_ok(b.stat_to_prove.period),
                 PoolError::StatMismatch
             ),
             (None, None) => {}
