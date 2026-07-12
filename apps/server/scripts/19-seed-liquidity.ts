@@ -56,7 +56,7 @@ for (const s of seeds) {
   );
   const provider = new AnchorProvider(
     connection,
-    { publicKey: keeper.publicKey, signTransaction: async (t) => (t.partialSign(keeper), t), signAllTransactions: async (ts) => ts.map((t) => (t.partialSign(keeper), t)) } as never,
+    { publicKey: keeper.publicKey, signTransaction: async (t: Transaction) => (t.partialSign(keeper), t), signAllTransactions: async (ts: Transaction[]) => ts.map((t) => (t.partialSign(keeper), t)) } as never,
     { commitment: 'confirmed' },
   );
   await provider.sendAndConfirm(tx, []);

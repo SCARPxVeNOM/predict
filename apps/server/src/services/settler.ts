@@ -26,6 +26,38 @@ import { bus } from './bus.js';
 export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
   let stopped = false;
 
+  /**
+   * Pick the record whose proof leaf period matches the market's scoped
+   * period. NOT simply the highest seq: a match that goes to extra time or
+   * penalties appends an undocumented status=100 archival record whose proof
+   * reports period 100, and finished-phase records report their phase (e.g.
+   * 10 for FET) — only the normalized full-totals record reports period 0.
+   * Picking the wrong one makes the pool program reject with StatMismatch.
+   * Cached per fixture:period (~2 min) so 20+ markets don't each re-walk.
+   */
+  const decidingSeqCache = new Map<string, { seq: number; at: number }>();
+  async function findDecidingSeq(
+    fixtureId: number,
+    period: number,
+    withStats: { Seq: number; StatusId?: number }[],
+  ): Promise<number | null> {
+    const key = `${fixtureId}:${period}`;
+    const hit = decidingSeqCache.get(key);
+    if (hit && Date.now() - hit.at < 120_000) return hit.seq;
+    const candidates = withStats
+      .filter((s) => s.StatusId === undefined || (s.StatusId >= 1 && s.StatusId <= 19))
+      .sort((a, b) => b.Seq - a.Seq)
+      .slice(0, 8);
+    for (const c of candidates) {
+      const probe = await ctx.txline.statValidation(fixtureId, c.Seq, period * 1000 + 1);
+      if (probe.statToProve.period === period) {
+        decidingSeqCache.set(key, { seq: c.Seq, at: Date.now() });
+        return c.Seq;
+      }
+    }
+    return null;
+  }
+
   async function settleOne(m: typeof schema.markets.$inferSelect) {
     const fixture = await db.query.fixtures.findFirst({
       where: eq(schema.fixtures.fixtureId, m.fixtureId),
@@ -33,15 +65,15 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     if (!fixture?.lastSeq) return;
     const terms = JSON.parse(m.termsJson) as PlainTerms;
 
-    // Highest-seq record with stats decides; the proof pins it to the root.
     const snaps = await ctx.txline.scoresSnapshot(m.fixtureId);
     const withStats = snaps.filter((s) => s.Stats && Object.keys(s.Stats).length > 0);
     if (!withStats.length) return;
-    const deciding = withStats.reduce((a, b) => (b.Seq > a.Seq ? b : a));
+    const decidingSeq = await findDecidingSeq(m.fixtureId, terms.period, withStats);
+    if (decidingSeq === null) return; // no period-matching record yet — retry next tick
 
     const val = await ctx.txline.statValidation(
       m.fixtureId,
-      deciding.Seq,
+      decidingSeq,
       terms.statAKey,
       terms.statBKey ?? undefined,
     );
@@ -51,7 +83,7 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     if (m.marketPda) {
       try {
         const sig = await resolveMarket(pool, ctx.keeper, m.marketPda, bundle, rootPda);
-        await afterResolve(m, terms, val, deciding.Seq, sig, day, rootPda.toBase58());
+        await afterResolve(m, terms, val, decidingSeq, sig, day, rootPda.toBase58());
       } catch (err) {
         const s = String(err);
         if (/RootNotAvailable/.test(s)) {
@@ -74,7 +106,7 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
       }
     } else {
       // Composite / receipt-only market: keeper verifies each leg read-only.
-      await afterResolve(m, terms, val, deciding.Seq, null, day, rootPda.toBase58());
+      await afterResolve(m, terms, val, decidingSeq, null, day, rootPda.toBase58());
     }
   }
 
@@ -88,16 +120,17 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     const snaps = await ctx.txline.scoresSnapshot(m.fixtureId);
     const withStats = snaps.filter((s) => s.Stats && Object.keys(s.Stats).length > 0);
     if (!withStats.length) return;
-    const deciding = withStats.reduce((a, b) => (b.Seq > a.Seq ? b : a));
+    const decidingSeq = await findDecidingSeq(m.fixtureId, terms.period, withStats);
+    if (decidingSeq === null) return;
     const val = await ctx.txline.statValidation(
       m.fixtureId,
-      deciding.Seq,
+      decidingSeq,
       terms.statAKey,
       terms.statBKey ?? undefined,
     );
     const bundle = toStatProofBundle(val);
     const { pda: rootPda, epochDay: day } = rootPdaForBundle(bundle);
-    await afterResolve(m, terms, val, deciding.Seq, m.resolveTx, day, rootPda.toBase58(), true);
+    await afterResolve(m, terms, val, decidingSeq, m.resolveTx, day, rootPda.toBase58(), true);
     console.log(`[settler] receipt backfilled for ${m.id}`);
   }
 
