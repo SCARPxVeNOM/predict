@@ -77,6 +77,29 @@ input { font-family: inherit; }
   padding: 20px 14px; display: flex; flex-direction: column; gap: 4px;
   position: sticky; top: 0; height: 100vh;
 }
+/* Hamburger: hidden on desktop, floats top-left on mobile. */
+.hamburger {
+  display: none; position: fixed; top: 14px; left: 14px; z-index: 350;
+  width: 42px; height: 42px; border-radius: 11px; cursor: pointer;
+  background: var(--text); color: #fff; border: none; font-size: 19px; line-height: 1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.nav-scrim { display: none; }
+
+@media (max-width: 860px) {
+  .hamburger { display: grid; place-items: center; }
+  .nav-scrim {
+    display: block; position: fixed; inset: 0; z-index: 340;
+    background: rgba(10, 14, 25, 0.45);
+  }
+  .sidebar {
+    position: fixed; top: 0; left: 0; z-index: 345;
+    transform: translateX(-100%); transition: transform 0.22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .maincol { padding-top: 58px; } /* clear the fixed hamburger */
+}
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 22px; }
 .brand-ball {
   width: 36px; height: 36px; border-radius: 50%; background: var(--text); color: #fff;
@@ -171,6 +194,19 @@ input { font-family: inherit; }
 .class-chip.A { background: #e7f6ee; color: var(--green); }
 .class-chip.B { background: #fef3e2; color: var(--amber); }
 .class-chip.C { background: #e8effd; color: #3457d5; }
+
+/* Proofs / verification gallery */
+.proof-summary { display: flex; gap: 20px; margin: 4px 0 16px; color: var(--muted); font-size: 13px; }
+.proof-summary b { color: var(--text); font-size: 16px; }
+.proof-group { margin-bottom: 22px; }
+.proof-match {
+  display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700;
+  margin: 10px 0; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.proof-row { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--card, #fff); }
+.proof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.proof-q { font-size: 14px; font-weight: 600; }
+.proof-outcome { font-weight: 500; color: var(--muted); }
 
 /* Full-screen faucet success celebration */
 .faucet-overlay {

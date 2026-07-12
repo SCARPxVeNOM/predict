@@ -8,12 +8,14 @@ import Profile from './pages/Profile.js';
 import Leaderboard from './pages/Leaderboard.js';
 import Activity from './pages/Activity.js';
 import Settings from './pages/Settings.js';
+import Proofs from './pages/Proofs.js';
 
-type Tab = 'live' | 'predictions' | 'leaderboard' | 'portfolio' | 'activity' | 'settings';
+type Tab = 'live' | 'predictions' | 'proofs' | 'leaderboard' | 'portfolio' | 'activity' | 'settings';
 
 const NAV: { key: Tab; icon: string; label: string; live?: boolean }[] = [
   { key: 'live', icon: '⚡', label: 'Live Markets', live: true },
   { key: 'predictions', icon: '🗓️', label: 'Predictions' },
+  { key: 'proofs', icon: '🔎', label: 'Proofs' },
   { key: 'leaderboard', icon: '🏆', label: 'Leaderboard' },
   { key: 'portfolio', icon: '📊', label: 'Portfolio' },
   { key: 'activity', icon: '〰️', label: 'Activity' },
@@ -23,10 +25,25 @@ const NAV: { key: Tab; icon: string; label: string; live?: boolean }[] = [
 export default function App() {
   const [tab, setTab] = useState<Tab>('live');
   const [search, setSearch] = useState('');
+  const [navOpen, setNavOpen] = useState(false);
+
+  const go = (key: Tab) => {
+    setTab(key);
+    setNavOpen(false); // close the drawer after choosing on mobile
+  };
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <button
+        className="hamburger"
+        aria-label="Toggle menu"
+        aria-expanded={navOpen}
+        onClick={() => setNavOpen((v) => !v)}
+      >
+        {navOpen ? '✕' : '☰'}
+      </button>
+      {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
+      <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-ball">🏆</div>
           <div className="brand-name">Winners'Club</div>
@@ -35,7 +52,7 @@ export default function App() {
           <button
             key={n.key}
             className={`navbtn ${tab === n.key ? 'active' : ''}`}
-            onClick={() => setTab(n.key)}
+            onClick={() => go(n.key)}
           >
             <span>{n.icon}</span> {n.label}
             {n.live && <span className="live-pill">LIVE</span>}
@@ -85,6 +102,7 @@ export default function App() {
         ) : (
           <>
             {tab === 'predictions' && <Predictions />}
+            {tab === 'proofs' && <Proofs />}
             {tab === 'leaderboard' && <Leaderboard />}
             {tab === 'portfolio' && <Profile />}
             {tab === 'activity' && <Activity />}
