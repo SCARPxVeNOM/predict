@@ -4,8 +4,9 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "pnpm --filter @groundtruth/server start"
-healthcheckPath = "/api/health"
-healthcheckTimeout = 300
+# No healthcheck gate: the API listens within ~1s of boot, and gating routing
+# on a healthcheck let a transient RPC storm mark the deploy unhealthy and
+# stop routing entirely. Railway routes as soon as the process is listening.
 restartPolicyType = "ON_FAILURE"
 # High retry ceiling so a transient RPC 429 storm can't permanently down the
 # service (it recovers on restart; the backoff logic prevents re-storming).
