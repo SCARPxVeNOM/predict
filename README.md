@@ -98,6 +98,26 @@ The custom parimutuel pool program exists because TxLINE's own trading rails are
 
 Each settled Class-A market carries a receipt containing the market terms and their hash, the deciding record sequence, the proven stat leaves, the `daily_scores_roots` PDA and its hash, and the settlement transaction signature. The **Proofs** page in the app is a verification gallery: pick any settled market, expand its receipt, and hit **Re-verify** — your browser runs `validate_stat` as a read-only call against the same on-chain root and shows you the boolean. You never take our word for it.
 
+### How verification works — step by step
+
+Three on-chain artifacts back every settled market. Two of them are linked from each receipt (**"On-chain root ↗"** and **"Settlement tx ↗"**), and the third is the **Re-verify** button.
+
+**1. The on-chain root — the source of truth.** TxLINE doesn't only stream match data over an API; it also posts a **Merkle root** of every stat of every match that day into a Solana account, `daily_scores_roots` (seeds `["daily_scores_roots", u16le epochDay]`), owned by its `txoracle` program. A Merkle root is a single 32-byte fingerprint that commits to all of that day's numbers — change any one stat and the root changes completely. This account is the tamper-proof anchor every proof is checked against. (The receipt shows which day: e.g. *epoch day 20648*.)
+
+**2. The settlement transaction — proving the outcome on-chain.** When a match ends, the settler submits one permissionless transaction that calls `resolve` on our pool program. Inside it, the pool program makes a **CPI (cross-program call) into txoracle's `validate_stat`**, handing it the Merkle **proof** for the deciding stat. The oracle rebuilds the root from the proof and compares it to the posted `daily_scores_roots` root. Only if they match does the pool program record the winner and unlock payouts. No admin decides — the transaction either verifies against TxLINE's own committed data or it fails.
+
+**3. Re-verify — you check it yourself, read-only.** The **Re-verify** button re-runs the **same `validate_stat` check**, but as a read-only `.view()` **directly from your browser to Solana** — nothing signed, no transaction, no fee, and our backend is not in the loop. It reconstructs the Merkle root from the receipt's proof and compares it to the same on-chain root, then evaluates the market's predicate and returns `✓ proof valid on-chain` (or `✗`).
+
+**Why it can't be faked.** To return `✓`, the stat value plus the proof's sibling hashes must hash up to *exactly* the root TxLINE already posted on-chain. If the score or outcome were tampered with, the reconstructed root wouldn't match and it returns `✗`. Forging a valid proof for a false stat would mean breaking SHA-256.
+
+| Artifact | What it is | In the receipt |
+|---|---|---|
+| **On-chain root** | TxLINE's sealed Merkle fingerprint of the day's results | `On-chain root ↗` |
+| **Settlement TX** | The permissionless `resolve` that verified the outcome via CPI into `validate_stat` | `Settlement tx ↗` |
+| **Re-verify** | The same check re-run read-only from your browser | `Re-verify yourself` button |
+
+The settlement and the re-verify run the **identical** `validate_stat` logic — one writes state and moves funds, the other is a free read-only simulation — so a `✓` in your browser means the exact condition that released the money passes.
+
 ---
 
 ## Status
