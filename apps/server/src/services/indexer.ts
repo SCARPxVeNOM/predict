@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { Scores } from '@groundtruth/txline-client';
 import { FINISHED_STATUSES, VOID_STATUSES, decidingStatusFor, SOCCER_STATUS } from '@groundtruth/catalog';
 import { db, schema } from '../db/index.js';
+import { config } from '../config.js';
 import type { Ctx } from './txline.js';
 import { bus } from './bus.js';
 
@@ -150,19 +151,57 @@ export function startIndexer(ctx: Ctx) {
     });
   }
 
+  /**
+   * Pull the snapshot for a fixture and apply every record in seq order.
+   * Used by both startup hydration and the live-window poll below.
+   */
+  async function pullSnapshot(fixtureId: number) {
+    const snaps = await ctx.txline.scoresSnapshot(fixtureId).catch(() => []);
+    for (const s of snaps.sort((a, b) => a.Seq - b.Seq)) await apply(s);
+  }
+
   // Hydrate current state for live/imminent fixtures, then stream.
   void (async () => {
     try {
       const fxs = await db.query.fixtures.findMany();
       const soon = fxs.filter((f) => Math.abs(Date.now() - f.startTime) < 6 * 3600_000);
-      for (const f of soon) {
-        const snaps = await ctx.txline.scoresSnapshot(f.fixtureId).catch(() => []);
-        for (const s of snaps.sort((a, b) => a.Seq - b.Seq)) await apply(s);
-      }
+      for (const f of soon) await pullSnapshot(f.fixtureId);
     } catch (err) {
       console.error('[indexer] hydration failed', String(err).slice(0, 200));
     }
     connect();
+  })();
+
+  /**
+   * Live-window snapshot poll. The SSE stream is the primary path, but it can
+   * drop mid-match (a `disconnected` record, then silence) and never re-deliver
+   * the closing status — which leaves a real, finished match stuck with no
+   * score and its markets never advancing. So for every fixture currently in
+   * its match window and not yet finished/void, we re-pull the snapshot on a
+   * gentle cadence. This fires the TxLINE API only during live windows (usually
+   * 0–2 fixtures) — no idle polling, one call per in-window fixture per tick.
+   */
+  void (async () => {
+    while (!stopped) {
+      await new Promise((r) => setTimeout(r, config.livePollMs));
+      if (stopped) break;
+      try {
+        const now = Date.now();
+        const fxs = await db.query.fixtures.findMany();
+        const inWindow = fxs.filter(
+          (f) =>
+            now >= f.startTime - config.livePreKickoffMs &&
+            now <= f.startTime + config.livePostKickoffMs &&
+            !(f.statusId !== null && FINISHED_STATUSES.has(f.statusId)) &&
+            !(f.statusId !== null && VOID_STATUSES.has(f.statusId)),
+        );
+        for (const f of inWindow) {
+          await pullSnapshot(f.fixtureId);
+        }
+      } catch (err) {
+        console.error('[indexer] live poll failed', String(err).slice(0, 200));
+      }
+    }
   })();
 
   return () => {

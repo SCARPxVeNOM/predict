@@ -48,6 +48,16 @@ export const config = {
   aiTickMs: 6 * 3600_000,
   /** How often we check for live matches needing in-play AI markets. */
   liveAiPollMs: 60_000,
+  /** Snapshot-poll cadence for fixtures inside their match window. The SSE
+   * stream can drop mid-match (a `disconnected` record then silence), so we
+   * re-pull each in-window fixture's snapshot to keep status/score fresh and
+   * drive settlement. Only touches live-window fixtures — no idle polling. */
+  livePollMs: 75_000,
+  /** A fixture is "in its match window" from this long before kickoff until
+   * this long after — the only period the live snapshot poll fires for it.
+   * The tail covers extra time, penalties, and the ~5-min archival root. */
+  livePreKickoffMs: 15 * 60_000,
+  livePostKickoffMs: 5 * 3600_000,
 };
 
 export function loadKeeper(): Keypair {
