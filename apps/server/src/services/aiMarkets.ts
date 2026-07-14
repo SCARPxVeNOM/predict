@@ -546,9 +546,16 @@ fixtureId MUST be ${f.fixtureId}. Use the exact team names in questions and ment
         const hashHex = termsHashHex(fromPlainTerms(terms));
         if (existingHashes.has(hashHex)) continue; // identical predicate exists
 
-        // Short in-play betting window; the 60s feed delay is why it is not
-        // longer and why there are no "next event" markets at all.
-        const lockTs = now + 8 * 60_000;
+        // In-play betting window. These settle on FULL-GAME (period 0) or
+        // 2nd-half totals, so the outcome is NOT decided mid-match — an 8-min
+        // window locked them before anyone could bet. Keep them open long
+        // enough to actually trade (up to 25 min), but close before the frantic
+        // final phase (~85') so the 60s feed delay can't be exploited near full
+        // time. Never shorter than a 6-min minimum if authored late.
+        const lockTs = Math.max(
+          now + 6 * 60_000,
+          Math.min(now + 25 * 60_000, f.startTime + 85 * 60_000),
+        );
         let marketPda: string | null = null;
         let vaultPda: string | null = null;
         let createTx: string | null = null;
@@ -686,7 +693,7 @@ STRICT GRAMMAR (anything else is rejected):
 BALANCE RULE: pick lines a bookmaker would set — near the expected value given the form data, genuinely uncertain both ways. One-sided lines are rejected.
 Output ONLY JSON: {"markets":[{"slug","question","yesLabel","noLabel","fixtureId","period","statAKey","statBKey","comparison","threshold","op","rationale"}]}
 MATCH DATA: ${JSON.stringify(ctxJson)}
-fixtureId MUST be ${f.fixtureId}. Use exact team names in questions; cite the form numbers in rationale. Do NOT duplicate existingQuestions (the standard O/U goals, win, corners 8.5/10.5, yellows 3.5 markets already exist). Max 3 markets.`;
+fixtureId MUST be ${f.fixtureId}. Use exact team names in questions; cite the form numbers in rationale. Do NOT duplicate existingQuestions (the standard O/U goals, win, corners 8.5/10.5, yellows 3.5 markets already exist). Max 5 markets.`;
 
       const text = await geminiGenerate(prompt);
       if (!text) continue;
@@ -713,7 +720,7 @@ fixtureId MUST be ${f.fixtureId}. Use exact team names in questions; cite the fo
       for (const p of proposals) {
         if (p.fixtureId !== f.fixtureId) continue;
         if (p.slug.length < 3) continue;
-        if (created >= 3) break;
+        if (created >= 5) break;
         const famA = STAT_FAMILY[p.statAKey]!;
         if (p.op !== null) {
           if (p.statBKey === null) continue;
