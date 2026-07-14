@@ -17,10 +17,18 @@ export default function Predictions() {
   const { data: fixtures = [] } = useQuery({ queryKey: ['fixtures'], queryFn: () => api.fixtures() });
 
   const tournament = markets.filter((m) => m.id.startsWith('wc:'));
-  // Live contenders first; eliminated (settled) teams sink to the end, dimmed.
-  const outrights = tournament
-    .filter((m) => m.marketClass === 'C')
+  const allOutrights = tournament.filter((m) => m.marketClass === 'C');
+  // Only show a card you can act on: one with a real on-chain pool (stakeable)
+  // or one that already settled (shows the result). A champion outright with no
+  // pool yet can't be bet — showing a dead Yes/No-less card just confuses.
+  const outrights = allOutrights
+    .filter((m) => m.marketPda || m.state === 'Settled')
     .sort((a, b) => Number(a.state === 'Settled') - Number(b.state === 'Settled'));
+  // Teams still alive whose champion pool hasn't opened yet: list them as a
+  // note pointing at the stakeable path, instead of rendering dead cards.
+  const pendingContenders = allOutrights
+    .filter((m) => !m.marketPda && m.state !== 'Settled')
+    .map((m) => m.yesLabel);
 
   // Stakeable NOW: each remaining knockout tie's winner pools (the same
   // on-chain markets as the Live page, framed as bracket progression).
@@ -45,7 +53,9 @@ export default function Predictions() {
   const fixtureById = new Map(fixtures.map((f) => [f.fixtureId, f]));
   const aiSpecials = markets
     .filter((m) => {
-      if (m.origin !== 'ai' || m.fixtureId <= 0) return false;
+      // Real on-chain pools only — a composed champion outright (no pool, no
+      // Yes/No) is not a "special" you can bet, so it must not appear here.
+      if (m.origin !== 'ai' || m.fixtureId <= 0 || !m.marketPda) return false;
       const f = fixtureById.get(m.fixtureId);
       return f !== undefined && f.startTime > Date.now() - 12 * 3600_000;
     })
@@ -84,22 +94,25 @@ export default function Predictions() {
           like the Golden Boot need full-tournament stats the licensed feed's coverage window
           cannot provide, so we do not offer them.
         </div>
-        {!outrights.length ? (
-          <div className="empty">
-            Outright markets are generated from the live bracket — they appear as soon as the
-            remaining teams are known (the market author runs every few hours).
+        {pendingContenders.length > 0 && (
+          <div className="mini-note" style={{ marginBottom: outrights.length ? 12 : 0 }}>
+            ⏳ Still in contention: <b>{pendingContenders.join(', ')}</b> — their champion pool
+            opens once the final pairing is known. Until then, stake on them to win their next tie
+            in <b>Road to the Final</b> above.
           </div>
+        )}
+        {!outrights.length ? (
+          !pendingContenders.length && (
+            <div className="empty">
+              Outright markets are generated from the live bracket — they appear as soon as the
+              remaining teams are known (the market author runs every few hours).
+            </div>
+          )
         ) : (
           <div className="cards">
             {outrights.map((m) => (
               <div key={m.id} style={m.state === 'Settled' ? { opacity: 0.55 } : undefined}>
                 <MarketCard m={m} />
-                {!m.marketPda && m.state === 'Open' && (
-                  <div className="mini-note" style={{ marginTop: 6 }}>
-                    ⏳ champion stakes open when the final pairing is known — until then, back
-                    them in Road to the Final above
-                  </div>
-                )}
               </div>
             ))}
           </div>
