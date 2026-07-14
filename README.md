@@ -103,3 +103,35 @@ Each settled Class-A market carries a receipt containing the market terms and th
 ## Status
 
 Live on **Solana devnet**. The full settlement loop is proven end-to-end on real World Cup fixtures: markets auto-created, traders staked opposite sides, matches settled on-chain via proof→CPI (including extra-time and penalty-shootout matches), winners claimed pro-rata, receipts re-verified from the browser. Odds, sparklines, P&L, and verified-accuracy on the leaderboard are all computed from real on-chain pool state — no mock data anywhere.
+
+---
+
+## Gallery
+
+**Live Markets** — fixture-grouped cards with class badges, live odds pills, volume, and settled outcomes; every card labeled by how it settles.
+
+![Live Markets](docs/gallery/01-live-markets.png)
+
+**Predictions** — Road to the Final (stakeable knockout-winner pools), Tournament Outrights (eliminated teams dimmed), and AI Specials authored from TxLINE data.
+
+![Predictions](docs/gallery/02-predictions.png)
+
+**Leaderboard** — realized P&L, W/L, staked, and **verified accuracy** (share of chain-verified wins) — all from real on-chain pool state.
+
+![Leaderboard](docs/gallery/03-leaderboard.png)
+
+**Portfolio** — open positions, the receipts wall, won/lost/void status, and one-click **Claim winnings**.
+
+![Portfolio](docs/gallery/04-portfolio.png)
+
+**Receipt + browser re-verify** — the plain-English settlement line, proven stat leaves, root PDA, settlement tx, and a **Re-verify yourself** button that runs `validate_stat` read-only from your browser (`✓ proof valid on-chain`).
+
+![Receipt](docs/gallery/05-receipt.png)
+
+**On-chain root of trust** — the TxLINE `daily_scores_roots` PDA the proof verifies against, on Solana Explorer.
+
+![On-chain root](docs/gallery/06-onchain-root.png)
+
+**Settlement transaction** — the permissionless `resolve` that CPIs into txoracle's `validate_stat`, finalized on devnet.
+
+![Settlement transaction](docs/gallery/07-settlement-tx.png)
