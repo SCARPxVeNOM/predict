@@ -37,7 +37,16 @@ export default function Leaderboard() {
           return (
             <tr key={r.wallet}>
               <td>{i + 1}</td>
-              <td className="mono">{r.wallet.slice(0, 4)}…{r.wallet.slice(-4)}</td>
+              <td className="mono">
+                <a
+                  href={`https://explorer.solana.com/address/${r.wallet}?cluster=devnet`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Inspect this wallet on Solana Explorer (devnet)"
+                >
+                  {r.wallet}
+                </a>
+              </td>
               <td className={r.realizedPnl >= 0 ? 'pnl-pos' : 'pnl-neg'}>
                 {r.realizedPnl >= 0 ? '+' : ''}
                 {r.realizedPnl.toFixed(2)}

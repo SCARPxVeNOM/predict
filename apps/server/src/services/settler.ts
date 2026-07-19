@@ -1,5 +1,6 @@
 import { and, eq, inArray, lt } from 'drizzle-orm';
 import type { Program } from '@coral-xyz/anchor';
+import { PublicKey } from '@solana/web3.js';
 import { DEVNET, epochDay, type PlainTerms } from '@groundtruth/shared';
 import { STAT_LABEL } from '@groundtruth/catalog';
 import {
@@ -157,6 +158,26 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
     const { pda: rootPda, epochDay: day } = rootPdaForBundle(bundle);
     await afterResolve(m, terms, val, decidingSeq, m.resolveTx, day, rootPda.toBase58(), true);
     console.log(`[settler] receipt backfilled for ${m.id}`);
+  }
+
+  /**
+   * Recover the on-chain `resolve` transaction signature for a market that
+   * settled on-chain but whose DB row was rebuilt from chain state (which
+   * doesn't carry the tx sig). Walks the market PDA's recent history and
+   * returns the tx whose logs show the pool program's Resolve instruction, so
+   * the receipt can link the actual settlement transaction. Read-only.
+   */
+  async function recoverResolveTx(marketPda: string): Promise<string | null> {
+    const conn = pool.provider.connection;
+    const sigs = await conn.getSignaturesForAddress(new PublicKey(marketPda), { limit: 15 });
+    for (const s of sigs) {
+      if (s.err) continue;
+      const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
+      if (tx?.meta?.logMessages?.some((l) => l.includes('Instruction: Resolve'))) {
+        return s.signature;
+      }
+    }
+    return null;
   }
 
   async function afterResolve(
@@ -379,6 +400,35 @@ export function startSettler(ctx: Ctx, pool: Program<GroundtruthPool>) {
             backfilled += 1;
           } catch (err) {
             console.error(`[settler] receipt backfill ${m.id}: ${String(err).slice(0, 200)}`);
+          }
+        }
+
+        // resolveTx backfill: markets that settled on-chain but were later
+        // rebuilt from chain state lost their resolve tx signature (the pool
+        // account doesn't store it). Recover it from the PDA history — a few
+        // per tick to stay under the RPC budget — so the receipt links the
+        // real Settlement tx. Once filled it is skipped forever. Markets with
+        // no PDA (Class C / receipt-only composites) are null by design.
+        let txFilled = 0;
+        for (const m of settledMarkets) {
+          if (txFilled >= 3) break;
+          if (!m.marketPda || m.resolveTx) continue;
+          try {
+            const sig = await recoverResolveTx(m.marketPda);
+            if (!sig) continue;
+            await db
+              .update(schema.markets)
+              .set({ resolveTx: sig, updatedAt: Date.now() })
+              .where(eq(schema.markets.id, m.id));
+            await db
+              .update(schema.receipts)
+              .set({ resolveTx: sig })
+              .where(eq(schema.receipts.marketId, m.id));
+            bus.emit('market', { id: m.id, resolveTx: sig });
+            txFilled += 1;
+            console.log(`[settler] resolveTx recovered for ${m.id}: ${sig}`);
+          } catch (err) {
+            console.error(`[settler] resolveTx backfill ${m.id}: ${String(err).slice(0, 200)}`);
           }
         }
 

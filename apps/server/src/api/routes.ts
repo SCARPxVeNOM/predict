@@ -105,10 +105,19 @@ export function registerRoutes(app: FastifyInstance): void {
   app.get('/api/stream', (req, reply) => {
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      // `no-transform` + `X-Accel-Buffering: no` tell Cloudflare / the Railway
+      // edge not to buffer or compress the stream (otherwise they hold the
+      // response — including the headers — until the first flush, so the client
+      // sees a dead connection whenever no match is live).
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
       'Access-Control-Allow-Origin': '*',
     });
+    // Flush the head immediately so the browser's EventSource fires `open`
+    // right away and proxies forward the connection instead of buffering it.
+    reply.raw.write('retry: 3000\n\n');
+    reply.raw.write(': connected\n\n');
     const send = (event: string) => (payload: unknown) => {
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
     };
@@ -116,7 +125,8 @@ export function registerRoutes(app: FastifyInstance): void {
     const onMarket = send('market');
     bus.on('score', onScore);
     bus.on('market', onMarket);
-    const ping = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
+    // 15s heartbeat keeps intermediaries from idling the connection closed.
+    const ping = setInterval(() => reply.raw.write(': ping\n\n'), 15_000);
     req.raw.on('close', () => {
       clearInterval(ping);
       bus.off('score', onScore);

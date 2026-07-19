@@ -340,6 +340,9 @@ h3.sec { font-size: 16px; font-weight: 700; margin: 22px 0 12px; }
 table.lb { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 table.lb th, table.lb td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--border); }
 table.lb th { color: var(--muted); font-weight: 500; font-size: 12px; }
+table.lb td.mono { max-width: 340px; }
+table.lb td.mono a { color: var(--accent, #2563eb); text-decoration: none; }
+table.lb td.mono a:hover { text-decoration: underline; }
 .activity-row {
   display: flex; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--border);
   font-size: 13px; align-items: baseline;
